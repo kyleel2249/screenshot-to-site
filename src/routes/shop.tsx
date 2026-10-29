@@ -4,7 +4,7 @@ import { ProductCard } from "@/components/ProductCard";
 
 export const Route = createFileRoute("/shop")({
   validateSearch: (s: Record<string, unknown>): { category?: string } => ({
-    category: typeof s.category === "string" ? s.category : undefined,
+    category: typeof s["category"] === "string" ? (s["category"] as string) : undefined,
   }),
   head: () => ({
     meta: [
