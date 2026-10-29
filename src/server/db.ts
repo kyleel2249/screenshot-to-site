@@ -24,7 +24,7 @@ export interface OrderRow {
   items: OrderItemRow[]; hasPreorder: boolean; trackingSecretHash: string; processedEvents: string[]; history: { from: OrderStatus | null; to: OrderStatus; actor?: string; at: number; note?: string }[];
   reservedUntil: number; createdAt: number; refunded: number;
 }
-export interface SessionRow { id: string; userId: string; expiresAt: number; revoked: boolean }
+export interface SessionRow { id: string; userId: string; expiresAt: number; revoked: boolean; authAt: number }
 export interface TicketRow { id: string; userId?: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: "low" | "normal" | "high"; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }
 export interface EventRow { session: string; kind: string; path?: string; source?: string; campaign?: string; orderRef?: string; at: number }
 export interface PrivacyRequest { id: string; userId: string; kind: "export" | "deletion" | "correction"; status: "open" | "done"; at: number }
@@ -51,7 +51,7 @@ export class MemoryDb {
   settings: Record<string, string> = { displayMode: "GHS" };
   adminSetupClosed = false;
   redemptions = new Map<string, number>(); // `${userId}|${code}`
-  private seq = 0;
+  seq = 0;
   nextId(prefix: string) { return `${prefix}_${(++this.seq).toString(36)}${Math.random().toString(36).slice(2, 8)}`; }
   log(event: string, detail: Record<string, string | number | boolean> = {}, actor?: string) {
     this.audit.push({ id: this.audit.length + 1, ...(actor ? { actor } : {}), event, detail, at: Date.now() });

@@ -3,6 +3,7 @@ import { money, type Currency } from "../../lib/domain/money";
 import { randomToken, sha256Hex, timingSafeEqual } from "../../lib/security/crypto";
 import type { MemoryDb, OrderRow } from "../db";
 import { requirePermission, type Actor } from "../rbac";
+import { ValidationError } from "./catalog-admin";
 
 export const RESERVATION_MS = 30 * 60_000;
 
@@ -119,25 +120,26 @@ export function requestCancellation(db: MemoryDb, actor: Actor | null, orderId: 
 /* ---------- staff operations ---------- */
 export function staffUpdateStatus(db: MemoryDb, actor: Actor | null, orderId: string, to: OrderStatus, note?: string) {
   requirePermission(actor, "order.update");
-  const o = db.orders.get(orderId); if (!o) throw new Error("Unknown order");
-  if (to === "payment_confirmed") throw new Error("Payment can only be confirmed by a verified provider event.");
+  const o = db.orders.get(orderId); if (!o) throw new ValidationError(["Unknown order."]);
+  if (to === "payment_confirmed") throw new ValidationError(["Payment can only be confirmed by a verified provider event."]);
+  if (!canTransition(o.status, to)) throw new ValidationError([`An order cannot move from ${o.status} to ${to}.`]);
   const from = o.status; setStatus(o, to, actor.id, note);
   db.log("order.status_changed", { orderId, from, to }, actor.id);
 }
 
 export function requestRefund(db: MemoryDb, actor: Actor | null, orderId: string, amount: number, now = Date.now()) {
   requirePermission(actor, "order.refund", now);
-  const o = db.orders.get(orderId); if (!o) throw new Error("Unknown order");
-  if (!Number.isInteger(amount) || amount <= 0) throw new Error("Invalid refund amount.");
-  if (o.refunded + amount > o.total) throw new Error("Refund exceeds the amount paid.");
-  if (!canTransition(o.status, "refund_pending") && o.status !== "refund_pending") throw new Error("This order is not refundable in its current state.");
+  const o = db.orders.get(orderId); if (!o) throw new ValidationError(["Unknown order."]);
+  if (!Number.isInteger(amount) || amount <= 0) throw new ValidationError(["Invalid refund amount."]);
+  if (o.refunded + amount > o.total) throw new ValidationError(["Refund exceeds the amount paid."]);
+  if (!canTransition(o.status, "refund_pending") && o.status !== "refund_pending") throw new ValidationError(["This order is not refundable in its current state."]);
   if (o.status !== "refund_pending") setStatus(o, "refund_pending", actor.id, `Refund of ${money(amount, o.currency).amount} requested`, now);
   db.log("refund.requested", { orderId, amount, currency: o.currency }, actor.id); // refunds keep the order currency
   return { orderId, amount, currency: o.currency };
 }
 /** Called when the provider confirms the refund. */
 export function completeRefund(db: MemoryDb, orderId: string, amount: number, now = Date.now()) {
-  const o = db.orders.get(orderId); if (!o || o.status !== "refund_pending") throw new Error("No pending refund");
+  const o = db.orders.get(orderId); if (!o || o.status !== "refund_pending") throw new ValidationError(["No pending refund."]);
   o.refunded += amount;
   setStatus(o, o.refunded >= o.total ? "refunded" : "partially_refunded", undefined, "Refund completed", now);
   db.log("refund.completed", { orderId, amount }); 
