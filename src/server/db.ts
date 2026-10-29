@@ -25,6 +25,9 @@ export interface OrderRow {
   reservedUntil: number; createdAt: number; refunded: number;
 }
 export interface SessionRow { id: string; userId: string; expiresAt: number; revoked: boolean }
+export interface TicketRow { id: string; userId?: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: "low" | "normal" | "high"; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }
+export interface EventRow { session: string; kind: string; path?: string; source?: string; campaign?: string; orderRef?: string; at: number }
+export interface PrivacyRequest { id: string; userId: string; kind: "export" | "deletion" | "correction"; status: "open" | "done"; at: number }
 export interface AuditRow { id: number; actor?: string; event: string; detail: Record<string, string | number | boolean>; at: number }
 
 export class MemoryDb {
@@ -39,6 +42,11 @@ export class MemoryDb {
   discounts = new Map<string, Discount>();
   zones = new Map<string, ShippingZone>();
   audit: AuditRow[] = [];
+  tickets = new Map<string, TicketRow>();
+  events: EventRow[] = [];
+  wishlist = new Map<string, Set<string>>(); // userId -> productIds
+  consents: { userId: string; kind: string; granted: boolean; policyVersion?: string; at: number }[] = [];
+  privacy = new Map<string, PrivacyRequest>();
   tokens = new Map<string, { userId: string; kind: "verify" | "reset"; expiresAt: number }>();
   settings: Record<string, string> = { displayMode: "GHS" };
   adminSetupClosed = false;
