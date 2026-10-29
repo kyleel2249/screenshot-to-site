@@ -2,6 +2,9 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
+import { route } from "./server/edge";
+import { D1Persistence } from "./server/persistence/sql";
+import type { WorkerEnv } from "./server/worker-entry";
 
 type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
@@ -44,18 +47,28 @@ function isH3SwallowedErrorBody(body: string): boolean {
   }
 }
 
+async function renderApp(request: Request, env: unknown, ctx: unknown): Promise<Response> {
+  try {
+    const handler = await getServerEntry();
+    const response = await handler.fetch(request, env, ctx);
+    return await normalizeCatastrophicSsrResponse(response);
+  } catch (error) {
+    console.error(error);
+    return new Response(renderErrorPage(), { status: 500, headers: { "content-type": "text/html; charset=utf-8" } });
+  }
+}
+
+/** True when the Worker has everything the commerce API needs (D1 binding + required secrets). */
+function apiConfigured(env: unknown): env is WorkerEnv {
+  const e = env as Partial<WorkerEnv> | null | undefined;
+  return !!e && !!e.DB && !!e.SESSION_SECRET && !!e.SITE_ORIGIN;
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
-    try {
-      const handler = await getServerEntry();
-      const response = await handler.fetch(request, env, ctx);
-      return await normalizeCatastrophicSsrResponse(response);
-    } catch (error) {
-      console.error(error);
-      return new Response(renderErrorPage(), {
-        status: 500,
-        headers: { "content-type": "text/html; charset=utf-8" },
-      });
-    }
+    if (apiConfigured(env)) return route(request, env, new D1Persistence(env.DB), (r) => renderApp(r, env, ctx));
+    // Not configured (e.g. local `vite dev` without bindings): serve pages; the API reports itself unavailable instead of failing obscurely.
+    if (new URL(request.url).pathname.startsWith("/api/")) return new Response(JSON.stringify({ error: "Service not configured" }), { status: 503, headers: { "content-type": "application/json" } });
+    return renderApp(request, env, ctx);
   },
 };

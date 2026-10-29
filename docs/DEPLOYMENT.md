@@ -41,3 +41,15 @@ Apply `securityHeaders()` (src/lib/security/headers.ts) to HTML responses with a
 - Scheduled job calling `releaseExpired()` every few minutes (Cron Trigger).
 - Backups: `wrangler d1 export` on a schedule to private R2; **perform and record a restore test** — backups are not real until restored.
 - Legal review of the draft policy pages for Ghana; replace demo data and placeholder contact details.
+
+
+## How requests are routed
+`src/server.ts` hands every request to `src/server/edge.ts` when the Worker has the `DB` D1 binding plus `SESSION_SECRET` and `SITE_ORIGIN`:
+
+| Path | Answered by |
+|---|---|
+| `/api/*`, `<ADMIN_PORTAL_PATH>/api/*` | API handler (`src/server/api.ts`) |
+| `/sitemap.xml`, `/robots.txt` | generated (published products only) |
+| everything else | TanStack Start SSR, plus security headers; account/checkout/auth/tracking/portal pages are `no-store` + `noindex` |
+
+Without those bindings (plain `vite dev`) pages still render and `/api/*` returns 503. Delete `public/robots.txt` before deploying so the generated one (which carries the Sitemap line) is served. A nonce-based CSP (`buildCsp`) is not applied yet; add it after a real build confirms the framework's inline scripts carry the nonce.

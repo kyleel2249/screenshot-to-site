@@ -45,15 +45,16 @@ Run `npm i && npm run build && npm test` locally to verify the UI layer and rege
 - 🟡 Cart re-priced from authoritative records, stock-aware quantity changes
 - 🟡 About, FAQ, draft policy pages (clearly marked draft/pending legal review), branded 404
 - 🟡 Screens against the API (syntax-checked only; never compiled — registry unreachable here): `/login`, `/register`, `/forgot-password`, `/reset-password`, `/verify-email`, `/checkout` (zones, guest/signed-in, pre-order acknowledgement, idempotency key, shown-once tracking code), `/track`, `/account` (profile, addresses, orders, cancellation request, data export, account deletion), `/contact` + `/wholesale` (→ support tickets), staff dashboard at `/$portal` (owner enrolment, sign-in, products/status/price/stock/publish, orders/status/refund with re-auth prompt, audit)
+- 🟢 Edge router `src/server/edge.ts` (tested, `src/test/edge.test.ts`): `/api/*` and `<portal>/api/*` → API; `/sitemap.xml` (published products only, no private paths) and `/robots.txt` generated; hardening headers on every response; no-store + noindex on account/checkout/auth/tracking/portal pages. Wired in `src/server.ts` (only when the `DB` binding, `SESSION_SECRET` and `SITE_ORIGIN` exist; otherwise `/api` answers 503). The `server.ts` wiring itself is unverified until a real build
 - 🟢 Typed API client `src/lib/api-client.ts` is verified: `src/test/api-client.test.ts` drives it through the real handler with a cookie jar (register→verify→login→logout, owner enrolment, admin create→storefront visible→stock→checkout→admin sees order, wrong portal 404)
 
 ## Not started (requires backend/credentials or substantial further work)
-- ⛔ Mounting the API into the TanStack Start app (needs local build to verify) and switching the storefront from the labelled **demo seed** (`src/lib/catalog.ts`) to `GET /api/products`. Persistence is a single versioned document; migrate to the normalised schema as volume grows
+- ⛔ Switching the storefront from the labelled **demo seed** (`src/lib/catalog.ts`) to `GET /api/products`. Persistence is a single versioned document; migrate to the normalised schema as volume grows
 - ⛔ Still absent in the dashboard/services (products, orders, audit screens exist; these do not): discounts admin, shipping admin, content/CMS, staff invitations, MFA (flagged required, not implemented), wholesale/quotes, reviews
 - ⛔ Wishlist screens and persistent server-side cart (services exist). Cart still uses demo-seed variant ids until the storefront reads `GET /api/products`, so checkout will correctly reject demo items until real products are added in the dashboard
 - ⛔ Payment provider adapter + webhook signature verification (provider must be chosen after confirming Ghana merchant eligibility). Checkout currently tells the buyer payment is arranged by the business. Order/payment/refund *logic* exists and is tested. Dashboard sections for discounts, shipping zones, categories, support tickets and analytics (APIs/services exist for some) are not yet built
 - ⛔ Email/SMS notifications, reviews, support tickets, wholesale workflows, purchase orders/suppliers
-- ⛔ Analytics/consent *UI*, AI assistant, wiring headers + sitemap into real HTTP responses, backups/monitoring, deployment runbook
+- ⛔ Analytics/consent *UI*, AI assistant, nonce-based CSP injected into SSR output (needs a real build), backups/monitoring
 - ⛔ Vehicle-/footwear-/electronics-specific filter UIs (the `filterProfile` per category is seeded, UI not built)
 - ⛔ Inspecting the reference site and the supplied brand image (not provided in this session; no logo was invented)
 
