@@ -2,7 +2,9 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { api, newIdempotencyKey } from "@/lib/api";
 import type { ApiOrder } from "@/lib/api-client";
-import { quote, useCart } from "@/lib/cart";
+import { useCart } from "@/lib/cart";
+import { useCatalog } from "@/lib/catalog-store";
+import { estimate } from "@/lib/storefront";
 import { useCurrency } from "@/lib/currency";
 import { formatMoney } from "@/lib/domain/money";
 import { Errors, Field, inputCls, Notice, Page } from "@/components/Form";
@@ -19,7 +21,8 @@ function Checkout() {
   const { lines, clear } = useCart();
   const { mode } = useCurrency();
   const currency = mode === "USD" ? "USD" : "GHS";
-  const q = quote(lines, currency);
+  const { products } = useCatalog();
+  const q = estimate(lines, products, currency);
   const key = useRef(newIdempotencyKey());
   const [zones, setZones] = useState<Zone[] | null>(null);
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
@@ -30,7 +33,7 @@ function Checkout() {
 
   useEffect(() => { void api.zones().then((r) => setZones(r.ok ? r.data : [])); void api.me().then((r) => setSignedIn(r.ok)); }, []);
   const zone = zones?.find((z) => z.id === zoneId);
-  const hasPre = q.ok && q.cart.lines.some((l) => l.mode === "preorder");
+  const hasPre = q.ok && q.hasPreorder;
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
 
   async function submit(e: React.FormEvent) {
@@ -101,7 +104,7 @@ function Checkout() {
           <h2 className="font-display text-lg font-bold">Summary ({currency})</h2>
           {q.ok ? (
             <dl className="mt-3 space-y-2">
-              <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatMoney(q.cart.subtotal)}</dd></div>
+              <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatMoney(q.subtotal)}</dd></div>
               <div className="flex justify-between"><dt>Delivery</dt><dd>{zone ? formatMoney({ amount: zone.baseFee, currency: zone.currency }) : "Choose an area"}</dd></div>
             </dl>
           ) : <Errors errors={q.errors} />}

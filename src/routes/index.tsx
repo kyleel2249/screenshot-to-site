@@ -1,7 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ShieldCheck, Truck, Package, Headphones } from "lucide-react";
 import hero from "@/assets/hero.jpg";
-import { categories, products, productsIn, viewOf } from "@/lib/catalog";
+import { categories } from "@/lib/catalog";
+import { useCatalog } from "@/lib/catalog-store";
+import { hasLabel, productsIn, sortProducts } from "@/lib/storefront";
 import { topLevel } from "@/lib/domain/categories";
 import { ProductCard } from "@/components/ProductCard";
 
@@ -18,6 +20,9 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
+  const { products, status } = useCatalog();
+  const fresh = sortProducts(products.filter((p) => hasLabel(p, "new_arrival") || hasLabel(p, "just_landed")), "newest");
+  const arrivals = (fresh.length ? fresh : sortProducts(products, "newest")).slice(0, 4);
   const trust = [
     { icon: ShieldCheck, t: "Secure checkout", d: "Payment details are never stored on our site." },
     { icon: Truck, t: "Delivery in Ghana", d: "Delivery options confirmed at checkout." },
@@ -52,7 +57,7 @@ function Index() {
             <Link key={c.id} to="/shop" search={{ category: c.slug }} className="group card-elevated p-5 transition-shadow hover:shadow-lg">
               <p className="font-semibold text-primary group-hover:underline">{c.name}</p>
               <p className="mt-1 text-sm text-muted-foreground">{c.description}</p>
-              <p className="mt-3 text-xs font-medium text-gold-dark">{productsIn(c.id).length} {productsIn(c.id).length === 1 ? "product" : "products"}</p>
+              <p className="mt-3 text-xs font-medium text-gold-dark">{status === "ready" ? `${productsIn(products, categories, c.id).length} ${productsIn(products, categories, c.id).length === 1 ? "product" : "products"}` : "\u00a0"}</p>
             </Link>
           ))}
         </div>
@@ -64,8 +69,9 @@ function Index() {
             <h2 className="font-display text-3xl font-bold">New arrivals</h2>
             <Link to="/new-arrivals" className="text-sm font-medium text-primary hover:underline">View all</Link>
           </div>
+          {status === "ready" && arrivals.length === 0 && <p className="mt-8 text-muted-foreground">New products will appear here soon.</p>}
           <div className="mt-8 grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-6">
-            {products.filter((p) => viewOf(p).availability !== "discontinued").slice(0, 4).map((p) => <ProductCard key={p.slug} p={p} />)}
+            {arrivals.map((p) => <ProductCard key={p.slug} p={p} />)}
           </div>
         </div>
       </section>

@@ -1,18 +1,18 @@
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { displayPrice, viewOf, type Product } from "@/lib/catalog";
+import { displayPrice, isPurchasable, type StoreProduct } from "@/lib/storefront";
 import { useCart } from "@/lib/cart";
 import { useCurrency } from "@/lib/currency";
 import { AVAILABILITY_LABEL, PROMO_LABEL } from "@/lib/domain/status";
 
-export function ProductCard({ p }: { p: Product }) {
+export function ProductCard({ p }: { p: StoreProduct }) {
   const { add } = useCart();
   const { mode } = useCurrency();
-  const view = viewOf(p);
+  const view = p;
   const price = displayPrice(p, mode);
-  const purchasable = view.availability === "available" || view.availability === "pre_order";
+  const purchasable = isPurchasable(p);
   const cta = view.availability === "pre_order" ? "Pre-order" : view.availability === "coming_soon" ? "Coming soon" : "Add to cart";
-  const variantId = p.variants[0]!.id;
+  const variantId = p.variantId;
   return (
     <article className="group card-elevated overflow-hidden flex flex-col">
       <Link to="/product/$slug" params={{ slug: p.slug }} className="relative block aspect-square overflow-hidden bg-muted">

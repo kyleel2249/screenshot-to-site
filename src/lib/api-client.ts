@@ -6,7 +6,7 @@ import type { Availability, PromoLabel } from "./domain/status";
 import type { Currency } from "./domain/money";
 
 export interface ApiProduct {
-  slug: string; name: string; categoryId: string; shortDescription: string; image: string; imageAlt: string;
+  slug: string; name: string; categoryId: string; createdAt: string; shortDescription: string; image: string; imageAlt: string;
   availability: Availability; labels: PromoLabel[]; price: Partial<Record<Currency, number>>; salePrice: Partial<Record<Currency, number>> | null;
   variantId: string; remaining?: number; expectedWindow?: string | null;
 }

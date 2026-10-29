@@ -2,6 +2,8 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import type { AdminOrder, AdminProduct } from "@/lib/api-client";
+import { categories } from "@/lib/catalog";
+import { childrenOf, topLevel } from "@/lib/domain/categories";
 import { formatMoney } from "@/lib/domain/money";
 import { AVAILABILITY_LABEL, type Availability } from "@/lib/domain/status";
 import { labelOf, nextStatuses } from "@/lib/order-labels";
@@ -103,7 +105,13 @@ function Products({ admin }: { admin: Admin }) {
         <h2 className="font-display text-lg font-bold sm:col-span-2">Add product</h2>
         <Field label="Name" required value={nw.name} onChange={(e) => setNw({ ...nw, name: e.target.value })} />
         <Field label="SKU" required value={nw.sku} onChange={(e) => setNw({ ...nw, sku: e.target.value })} />
-        <Field label="Category id" required value={nw.categoryId} onChange={(e) => setNw({ ...nw, categoryId: e.target.value })} />
+        <div>
+          <label htmlFor="np-cat" className="mb-1 block text-sm font-medium">Category</label>
+          <select id="np-cat" required className={inputCls} value={nw.categoryId} onChange={(e) => setNw({ ...nw, categoryId: e.target.value })}>
+            <option value="" disabled>Choose…</option>
+            {topLevel(categories).map((g) => <optgroup key={g.id} label={g.name}>{[g, ...childrenOf(categories, g.id)].map((c) => <option key={c.id} value={c.id}>{c.id === g.id ? `${g.name} (general)` : c.name}</option>)}</optgroup>)}
+          </select>
+        </div>
         <Field label="Price (GHS)" type="number" step="0.01" min="0" required value={nw.priceGhs} onChange={(e) => setNw({ ...nw, priceGhs: e.target.value })} />
         <Field label="Opening stock" type="number" min="0" value={nw.onHand} onChange={(e) => setNw({ ...nw, onHand: e.target.value })} />
         <Field label="Short description" required value={nw.shortDescription} onChange={(e) => setNw({ ...nw, shortDescription: e.target.value })} />

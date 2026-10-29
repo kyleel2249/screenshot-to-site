@@ -1,9 +1,9 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { getVariantMap } from "./catalog";
 import { addLine, type CartLine } from "./cart-core";
-import { canPurchase } from "./domain/status";
+import { useCatalog } from "./catalog-store";
+import { canAdd, findByVariant } from "./storefront";
 
-export { quote, addLine, type CartLine } from "./cart-core";
+export { addLine, type CartLine } from "./cart-core";
 
 export type AddResult = { ok: true } | { ok: false; reason: string };
 
@@ -20,6 +20,7 @@ const KEY = "ddt-cart-v2";
 
 export function CartProvider({ children }: { children: ReactNode }) {
   const [lines, setLines] = useState<CartLine[]>([]);
+  const { products, status } = useCatalog();
   useEffect(() => {
     try {
       const raw: unknown = JSON.parse(localStorage.getItem(KEY) || "[]");
@@ -29,10 +30,9 @@ export function CartProvider({ children }: { children: ReactNode }) {
   const persist = (next: CartLine[]) => { setLines(next); try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* ignore */ } };
 
   const guard = (variantId: string, qty: number): AddResult => {
-    const v = getVariantMap().get(variantId);
-    if (!v) return { ok: false, reason: "This product is no longer available." };
-    const d = canPurchase(v, qty);
-    return d.ok ? { ok: true } : { ok: false, reason: d.reason };
+    if (status === "loading") return { ok: false, reason: "The catalogue is still loading. Try again in a moment." };
+    if (status === "error") return { ok: false, reason: "We couldn't load the catalogue. Check your connection and refresh." };
+    return canAdd(findByVariant(products, variantId), qty);
   };
 
   const value: Ctx = {

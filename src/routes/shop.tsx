@@ -1,5 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { categories, productsIn, viewOf, findBySlug } from "@/lib/catalog";
+import { categories, findBySlug } from "@/lib/catalog";
+import { useCatalog } from "@/lib/catalog-store";
+import { productsIn, search, sortProducts } from "@/lib/storefront";
 import { childrenOf, topLevel, breadcrumb } from "@/lib/domain/categories";
 import { AVAILABILITY_LABEL } from "@/lib/domain/status";
 import { Collection } from "@/components/Collection";
@@ -29,11 +31,10 @@ function Shop() {
   const { category, q, availability, sort } = Route.useSearch();
   const navigate = useNavigate({ from: "/shop" });
   const cat = category ? findBySlug(categories, category) : undefined;
-  let list = productsIn(cat?.id);
-  if (q) { const n = q.trim().toLowerCase(); list = list.filter((p) => p.name.toLowerCase().includes(n) || p.variants.some((v) => v.id.toLowerCase().includes(n))); }
-  if (availability) list = list.filter((p) => viewOf(p).availability === availability);
-  const cheapest = (p: (typeof list)[number]) => (p.variants[0]!.salePrice ?? p.variants[0]!.price).GHS ?? Number.MAX_SAFE_INTEGER;
-  list = [...list].sort((a, b) => sort === "price-asc" ? cheapest(a) - cheapest(b) : sort === "price-desc" ? cheapest(b) - cheapest(a) : b.createdAt.localeCompare(a.createdAt));
+  const { products } = useCatalog();
+  let list = search(productsIn(products, categories, cat?.id), q ?? "");
+  if (availability) list = list.filter((p) => p.availability === availability);
+  list = sortProducts(list, sort);
 
   const pill = (active: boolean) => `rounded-full border px-4 py-1.5 text-sm transition-colors ${active ? "border-primary bg-primary text-primary-foreground" : "border-border hover:border-primary"}`;
   const subs = cat ? childrenOf(categories, cat.parentId ?? cat.id) : [];

@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Minus, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { products } from "@/lib/catalog";
-import { quote, useCart } from "@/lib/cart";
+import { useCart } from "@/lib/cart";
+import { useCatalog } from "@/lib/catalog-store";
+import { estimate, findByVariant } from "@/lib/storefront";
 import { useCurrency } from "@/lib/currency";
 import { formatMoney } from "@/lib/domain/money";
 
@@ -22,7 +23,8 @@ function Cart() {
   const { mode, setMode } = useCurrency();
   // Cart pays in a single currency; DUAL display falls back to GHS for the charge.
   const currency = mode === "USD" ? "USD" : "GHS";
-  const result = quote(lines, currency);
+  const { products, status } = useCatalog();
+  const result = estimate(lines, products, currency);
 
   if (lines.length === 0)
     return (
@@ -32,7 +34,6 @@ function Cart() {
       </div>
     );
 
-  const byVariant = new Map(products.flatMap((p) => p.variants.map((v) => [v.id, p] as const)));
   return (
     <div className="container-x grid gap-10 py-12 lg:grid-cols-[1fr_22rem]">
       <div>
@@ -45,9 +46,11 @@ function Cart() {
         )}
         <ul className="mt-6 divide-y divide-border">
           {lines.map((l) => {
-            const p = byVariant.get(l.variantId);
-            if (!p) return null;
-            const priced = result.ok ? result.cart.lines.find((x) => x.variantId === l.variantId) : undefined;
+            const p = findByVariant(products, l.variantId);
+            if (!p) return status === "ready" ? (
+              <li key={l.variantId} className="flex items-center justify-between gap-4 py-5 text-sm"><span>This item is no longer available.</span><button className="underline" onClick={() => remove(l.variantId)}>Remove</button></li>
+            ) : null;
+            const priced = result.lines.find((x) => x.variantId === l.variantId);
             return (
               <li key={l.variantId} className="flex gap-4 py-5">
                 <img src={p.image} alt={p.imageAlt} width={96} height={96} className="h-24 w-24 rounded-lg object-cover" />
@@ -75,12 +78,10 @@ function Cart() {
         </label>
         {result.ok && (
           <dl className="mt-4 space-y-2 text-sm">
-            <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatMoney(result.cart.subtotal)}</dd></div>
-            {result.cart.discount.amount > 0 && <div className="flex justify-between"><dt>Discount</dt><dd>-{formatMoney(result.cart.discount)}</dd></div>}
-            <div className="flex justify-between font-semibold"><dt>Total before delivery</dt><dd className="text-primary">{formatMoney(result.cart.total)}</dd></div>
+            <div className="flex justify-between font-semibold"><dt>Estimated subtotal</dt><dd className="text-primary">{formatMoney(result.subtotal)}</dd></div>
           </dl>
         )}
-        <p className="mt-2 text-xs text-muted-foreground">Delivery and taxes are confirmed at checkout. Prices are re-checked against live stock.</p>
+        <p className="mt-2 text-xs text-muted-foreground">Delivery, discounts and taxes are confirmed at checkout. Prices are re-checked against live stock when you place the order.</p>
         <Link to="/checkout" className="btn-primary mt-6 w-full">Proceed to checkout</Link>
         <Link to="/contact" className="mt-3 block text-center text-sm text-primary hover:underline">Order by contacting us</Link>
       </aside>

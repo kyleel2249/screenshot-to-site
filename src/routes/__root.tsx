@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 
 import { Toaster } from "sonner";
 import { CartProvider } from "@/lib/cart";
+import { CatalogProvider } from "@/lib/catalog-store";
 import { CurrencyProvider } from "@/lib/currency";
 import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
 import appCss from "../styles.css?url";
@@ -119,6 +120,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
       <CurrencyProvider>
+        <CatalogProvider>
         <CartProvider>
           <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-gold focus:p-2 focus:text-gold-foreground">Skip to content</a>
           <SiteHeader />
@@ -126,6 +128,7 @@ function RootComponent() {
           <SiteFooter />
           <Toaster position="bottom-right" />
         </CartProvider>
+        </CatalogProvider>
       </CurrencyProvider>
     </QueryClientProvider>
   );

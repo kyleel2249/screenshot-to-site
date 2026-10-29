@@ -68,7 +68,7 @@ function publicProducts(db: MemoryDb, now = new Date()) {
     if (!v || !v.published || (v.publishAt && new Date(v.publishAt) > now)) continue;
     const hasSale = !!v.salePrice;
     out.push({
-      slug: p.slug, name: p.name, categoryId: p.categoryId, shortDescription: p.shortDescription, image: p.image, imageAlt: p.imageAlt,
+      slug: p.slug, name: p.name, categoryId: p.categoryId, createdAt: p.createdAt, shortDescription: p.shortDescription, image: p.image, imageAlt: p.imageAlt,
       availability: effectiveAvailability(v), labels: activePromoLabels(p.promo, v, { ...(p.showLimitedBelow !== undefined ? { showLimitedBelow: p.showLimitedBelow } : {}), hasValidSale: hasSale }, now),
       price: v.price, salePrice: v.salePrice ?? null, variantId: v.id,
       ...(p.showLimitedBelow !== undefined && v.trackInventory && sellableQty(v) > 0 && sellableQty(v) <= p.showLimitedBelow ? { remaining: sellableQty(v) } : {}),
