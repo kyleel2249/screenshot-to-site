@@ -70,6 +70,28 @@
   --color-navy-2: var(--navy-2);
 }
 
+/* Official brand tokens (single source of truth for hex values; semantic oklch tokens below are derived equivalents).
+   NO GREEN is used anywhere in this theme. */
+:root {
+  --brand-navy: #071D49;
+  --brand-gold: #F5B900;
+  --brand-white: #FFFFFF;
+  --brand-blue-secondary: #0D2B63;
+  --brand-gold-dark: #D99A00;
+  --brand-grey-light: #F4F6FA;
+  --brand-charcoal: #202938;
+  --brand-border: #DCE2EC;
+  --radius-xl-top: 40px 40px 0 0;
+  --radius-full: 9999px;
+  --transition-standard: 250ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+:focus-visible { outline: 3px solid var(--brand-gold); outline-offset: 2px; }
+
 :root {
   --radius: 0.75rem;
   --background: oklch(1 0 0);
@@ -120,3 +142,5 @@
 @utility btn-secondary { display: inline-flex; align-items: center; justify-content: center; border-radius: 9999px; background: var(--color-primary); color: var(--color-primary-foreground); font-weight: 500; font-size: .875rem; padding: .6rem 1.25rem; transition: background 250ms ease; &:hover { background: var(--color-navy-2); } }
 @utility badge-preorder { border-radius: 9999px; background: var(--color-primary); color: var(--color-gold); font-size: .7rem; font-weight: 600; padding: .2rem .6rem; letter-spacing: .04em; text-transform: uppercase; }
 
+
+@utility badge-label { border-radius: 9999px; background: var(--brand-gold); color: var(--brand-navy); font-size: .7rem; font-weight: 600; padding: .2rem .6rem; letter-spacing: .04em; text-transform: uppercase; }

@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 
 import { Toaster } from "sonner";
 import { CartProvider } from "@/lib/cart";
+import { CurrencyProvider } from "@/lib/currency";
 import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
@@ -26,12 +27,7 @@ function NotFoundComponent() {
           The page you're looking for doesn't exist or has been moved.
         </p>
         <div className="mt-6">
-          <Link
-            to="/"
-            className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
-          >
-            Go home
-          </Link>
+          <Link to="/" className="btn-primary">Go home</Link>
         </div>
       </div>
     </div>
@@ -122,12 +118,15 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <CartProvider>
-        <SiteHeader />
-        <main><Outlet /></main>
-        <SiteFooter />
-        <Toaster position="bottom-right" />
-      </CartProvider>
+      <CurrencyProvider>
+        <CartProvider>
+          <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-gold focus:p-2 focus:text-gold-foreground">Skip to content</a>
+          <SiteHeader />
+          <main id="main"><Outlet /></main>
+          <SiteFooter />
+          <Toaster position="bottom-right" />
+        </CartProvider>
+      </CurrencyProvider>
     </QueryClientProvider>
   );
 }

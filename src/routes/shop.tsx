@@ -1,40 +1,81 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { categories, products } from "@/lib/catalog";
-import { ProductCard } from "@/components/ProductCard";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { categories, productsIn, viewOf, findBySlug } from "@/lib/catalog";
+import { childrenOf, topLevel, breadcrumb } from "@/lib/domain/categories";
+import { AVAILABILITY_LABEL } from "@/lib/domain/status";
+import { Collection } from "@/components/Collection";
+
+type Sort = "newest" | "price-asc" | "price-desc";
+interface Search { category?: string | undefined; q?: string | undefined; availability?: string | undefined; sort?: Sort | undefined }
 
 export const Route = createFileRoute("/shop")({
-  validateSearch: (s: Record<string, unknown>): { category?: string | undefined } => ({
+  validateSearch: (s: Record<string, unknown>): Search => ({
     category: typeof s["category"] === "string" ? (s["category"] as string) : undefined,
+    q: typeof s["q"] === "string" ? (s["q"] as string) : undefined,
+    availability: typeof s["availability"] === "string" ? (s["availability"] as string) : undefined,
+    sort: s["sort"] === "price-asc" || s["sort"] === "price-desc" || s["sort"] === "newest" ? (s["sort"] as Sort) : undefined,
   }),
   head: () => ({
     meta: [
       { title: "Shop — Dera Darko Trade" },
-      { name: "description", content: "Browse imported electronics, home & kitchen and fashion products priced in GH₵." },
+      { name: "description", content: "Browse imported products across fashion, phones, home, beauty and more." },
       { property: "og:title", content: "Shop — Dera Darko Trade" },
-      { property: "og:description", content: "Browse in-stock and preorder imports." },
+      { property: "og:description", content: "Browse in-stock and pre-order imports." },
     ],
   }),
   component: Shop,
 });
 
 function Shop() {
-  const { category } = Route.useSearch();
-  const list = category ? products.filter((p) => p.category === category) : products;
-  const pill = (active: boolean) =>
-    `rounded-full border px-4 py-1.5 text-sm transition-colors ${active ? "border-primary bg-primary text-primary-foreground" : "border-border hover:border-primary"}`;
+  const { category, q, availability, sort } = Route.useSearch();
+  const navigate = useNavigate({ from: "/shop" });
+  const cat = category ? findBySlug(categories, category) : undefined;
+  let list = productsIn(cat?.id);
+  if (q) { const n = q.trim().toLowerCase(); list = list.filter((p) => p.name.toLowerCase().includes(n) || p.variants.some((v) => v.id.toLowerCase().includes(n))); }
+  if (availability) list = list.filter((p) => viewOf(p).availability === availability);
+  const cheapest = (p: (typeof list)[number]) => (p.variants[0]!.salePrice ?? p.variants[0]!.price).GHS ?? Number.MAX_SAFE_INTEGER;
+  list = [...list].sort((a, b) => sort === "price-asc" ? cheapest(a) - cheapest(b) : sort === "price-desc" ? cheapest(b) - cheapest(a) : b.createdAt.localeCompare(a.createdAt));
+
+  const pill = (active: boolean) => `rounded-full border px-4 py-1.5 text-sm transition-colors ${active ? "border-primary bg-primary text-primary-foreground" : "border-border hover:border-primary"}`;
+  const subs = cat ? childrenOf(categories, cat.parentId ?? cat.id) : [];
+  const crumbs = cat ? breadcrumb(categories, cat.id) : [];
+
   return (
-    <div className="container-x py-12">
-      <h1 className="font-display text-4xl font-bold">Shop</h1>
-      <div className="mt-6 flex flex-wrap gap-2">
+    <Collection title={cat ? cat.name : "Shop"} intro={cat?.description} items={list} empty="No products match these filters.">
+      {crumbs.length > 0 && (
+        <nav aria-label="Breadcrumb" className="mt-3 text-sm text-muted-foreground">
+          <Link to="/shop" search={{}} className="hover:underline">Shop</Link>
+          {crumbs.map((c) => <span key={c.id}> / <Link to="/shop" search={{ category: c.slug }} className="hover:underline">{c.name}</Link></span>)}
+        </nav>
+      )}
+      <div className="mt-6 flex flex-wrap gap-2" aria-label="Categories">
         <Link to="/shop" search={{}} className={pill(!category)}>All</Link>
-        {categories.map((c) => (
-          <Link key={c.slug} to="/shop" search={{ category: c.slug }} className={pill(category === c.slug)}>{c.name}</Link>
+        {topLevel(categories).map((c) => (
+          <Link key={c.id} to="/shop" search={{ category: c.slug }} className={pill(cat?.id === c.id || cat?.parentId === c.id)}>{c.name}</Link>
         ))}
       </div>
-      <p className="mt-6 text-sm text-muted-foreground">{list.length} products · demo catalogue</p>
-      <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 md:gap-6">
-        {list.map((p) => <ProductCard key={p.slug} p={p} />)}
+      {subs.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2" aria-label="Subcategories">
+          {subs.map((c) => <Link key={c.id} to="/shop" search={{ category: c.slug }} className={pill(cat?.id === c.id)}>{c.name}</Link>)}
+        </div>
+      )}
+      <div className="mt-6 grid gap-3 sm:grid-cols-3">
+        <label className="text-sm">Search
+          <input className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" defaultValue={q ?? ""} placeholder="Product name or SKU"
+            onKeyDown={(e) => { if (e.key === "Enter") navigate({ search: (s) => ({ ...s, q: e.currentTarget.value || undefined }) }); }} />
+        </label>
+        <label className="text-sm">Availability
+          <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={availability ?? ""} onChange={(e) => navigate({ search: (s) => ({ ...s, availability: e.target.value || undefined }) })}>
+            <option value="">All</option>
+            {(["available", "pre_order", "out_of_stock", "coming_soon"] as const).map((a) => <option key={a} value={a}>{AVAILABILITY_LABEL[a]}</option>)}
+          </select>
+        </label>
+        <label className="text-sm">Sort by
+          <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={sort ?? "newest"} onChange={(e) => navigate({ search: (s) => ({ ...s, sort: e.target.value as Sort }) })}>
+            <option value="newest">Newest</option><option value="price-asc">Price: low to high</option><option value="price-desc">Price: high to low</option>
+          </select>
+        </label>
       </div>
-    </div>
+      {(q || availability || sort) && <Link to="/shop" search={category ? { category } : {}} className="mt-3 inline-block text-sm text-primary hover:underline">Clear filters</Link>}
+    </Collection>
   );
 }

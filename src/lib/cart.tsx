@@ -1,42 +1,55 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { getProduct } from "./catalog";
+import { getVariantMap } from "./catalog";
+import { addLine, type CartLine } from "./cart-core";
+import { canPurchase } from "./domain/status";
 
-export interface CartLine { slug: string; qty: number }
+export { quote, addLine, type CartLine } from "./cart-core";
 
-export function cartTotal(lines: CartLine[]) {
-  return lines.reduce((sum, l) => sum + (getProduct(l.slug)?.price ?? 0) * l.qty, 0);
-}
-
-export function addLine(lines: CartLine[], slug: string, qty = 1): CartLine[] {
-  const found = lines.find((l) => l.slug === slug);
-  if (found) return lines.map((l) => (l.slug === slug ? { ...l, qty: l.qty + qty } : l));
-  return [...lines, { slug, qty }];
-}
+export type AddResult = { ok: true } | { ok: false; reason: string };
 
 interface Ctx {
   lines: CartLine[];
-  add: (slug: string) => void;
-  setQty: (slug: string, qty: number) => void;
-  remove: (slug: string) => void;
+  add: (variantId: string) => AddResult;
+  setQty: (variantId: string, qty: number) => AddResult;
+  remove: (variantId: string) => void;
   count: number;
-  total: number;
 }
 const CartCtx = createContext<Ctx | null>(null);
-const KEY = "ddt-cart";
+const KEY = "ddt-cart-v2";
 
 export function CartProvider({ children }: { children: ReactNode }) {
   const [lines, setLines] = useState<CartLine[]>([]);
   useEffect(() => {
-    try { setLines(JSON.parse(localStorage.getItem(KEY) || "[]")); } catch { /* ignore */ }
+    try {
+      const raw: unknown = JSON.parse(localStorage.getItem(KEY) || "[]");
+      if (Array.isArray(raw)) setLines(raw.filter((l): l is CartLine => !!l && typeof l.variantId === "string" && Number.isInteger(l.qty) && l.qty > 0));
+    } catch { /* ignore corrupt storage */ }
   }, []);
-  const update = (next: CartLine[]) => { setLines(next); localStorage.setItem(KEY, JSON.stringify(next)); };
+  const persist = (next: CartLine[]) => { setLines(next); try { localStorage.setItem(KEY, JSON.stringify(next)); } catch { /* ignore */ } };
+
+  const guard = (variantId: string, qty: number): AddResult => {
+    const v = getVariantMap().get(variantId);
+    if (!v) return { ok: false, reason: "This product is no longer available." };
+    const d = canPurchase(v, qty);
+    return d.ok ? { ok: true } : { ok: false, reason: d.reason };
+  };
+
   const value: Ctx = {
     lines,
-    add: (slug) => update(addLine(lines, slug)),
-    setQty: (slug, qty) => update(qty <= 0 ? lines.filter((l) => l.slug !== slug) : lines.map((l) => (l.slug === slug ? { ...l, qty } : l))),
-    remove: (slug) => update(lines.filter((l) => l.slug !== slug)),
+    add: (id) => {
+      const next = (lines.find((l) => l.variantId === id)?.qty ?? 0) + 1;
+      const g = guard(id, next);
+      if (g.ok) persist(addLine(lines, id));
+      return g;
+    },
+    setQty: (id, qty) => {
+      if (qty <= 0) { persist(lines.filter((l) => l.variantId !== id)); return { ok: true }; }
+      const g = guard(id, qty);
+      if (g.ok) persist(lines.map((l) => (l.variantId === id ? { ...l, qty } : l)));
+      return g;
+    },
+    remove: (id) => persist(lines.filter((l) => l.variantId !== id)),
     count: lines.reduce((s, l) => s + l.qty, 0),
-    total: cartTotal(lines),
   };
   return <CartCtx.Provider value={value}>{children}</CartCtx.Provider>;
 }
