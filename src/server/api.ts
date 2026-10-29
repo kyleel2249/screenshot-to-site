@@ -11,6 +11,7 @@ import type { Currency } from "../lib/domain/money";
 import { verifyWebhook } from "../lib/payments/webhook";
 import { NO_STORE } from "../lib/security/headers";
 import { RateLimiter, verifySession } from "../lib/security/crypto";
+import { deleteZone, listDiscounts, listZones, saveDiscount, saveZone, setDiscountActive } from "./services/promotions";
 import { resolvePortalPath } from "../lib/security/enrolment";
 import type { MemoryDb } from "./db";
 import { Forbidden, requirePermission, type Actor } from "./rbac";
@@ -169,6 +170,12 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
           const csv = await transact(p, (db) => exportOrdersCsv(db, actor));
           return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="orders.csv"', ...NO_STORE } });
         }
+        if (sub === "/zones" && req.method === "GET") return json(await transact(p, (db) => listZones(db, actor)));
+        if (sub === "/zones" && req.method === "POST") return json(await transact(p, (db) => saveZone(db, actor, body)), 201);
+        if (sub === "/zones/delete" && req.method === "POST") { await transact(p, (db) => deleteZone(db, actor, str(body, "id"))); return json({ ok: true }); }
+        if (sub === "/discounts" && req.method === "GET") return json(await transact(p, (db) => listDiscounts(db, actor)));
+        if (sub === "/discounts" && req.method === "POST") return json(await transact(p, (db) => saveDiscount(db, actor, body)), 201);
+        if (sub === "/discounts/active" && req.method === "POST") { await transact(p, (db) => setDiscountActive(db, actor, str(body, "code"), bool(body, "active"))); return json({ ok: true }); }
         if (sub === "/audit" && req.method === "GET") { requirePermission(actor, "audit.read"); return json(await transact(p, (db) => db.audit.slice(-200))); }
       } catch (e) { return mapError(e); }
       return notFound();

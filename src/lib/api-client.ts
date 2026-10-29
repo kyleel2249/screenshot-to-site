@@ -69,10 +69,18 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
       setOrderStatus: (orderId: string, to: string, note?: string) => post(`${portal}/api/orders/status`, { orderId, to, ...(note ? { note } : {}) }),
       reauth: (password: string) => post(`${portal}/api/reauth`, { password }),
       refund: (orderId: string, amount: number) => post<{ amount: number; currency: string }>(`${portal}/api/refunds`, { orderId, amount }),
+      zones: () => get<AdminZone[]>(`${portal}/api/zones`),
+      saveZone: (b: Partial<AdminZone> & { name: string; regions: string[]; currency: Currency; baseFee: number; estimate: string }) => post<AdminZone>(`${portal}/api/zones`, b),
+      deleteZone: (id: string) => post(`${portal}/api/zones/delete`, { id }),
+      discounts: () => get<AdminDiscount[]>(`${portal}/api/discounts`),
+      saveDiscount: (b: Partial<AdminDiscount> & { code: string; kind: AdminDiscount["kind"]; value: number }) => post<AdminDiscount>(`${portal}/api/discounts`, b),
+      setDiscountActive: (code: string, active: boolean) => post(`${portal}/api/discounts/active`, { code, active }),
       audit: () => get<{ id: number; actor?: string; event: string; at: number }[]>(`${portal}/api/audit`),
     }),
   };
 }
 export interface AdminProduct { id: string; slug: string; name: string; archived: boolean; variantId: string | null; sku: string | null; availability: Availability | null; published: boolean; price: Partial<Record<Currency, number>>; salePrice: Partial<Record<Currency, number>> | null; onHand: number; reserved: number; preOrderEnabled: boolean }
+export interface AdminZone { id: string; name: string; regions: string[]; currency: Currency; baseFee: number; perKgFee: number; freeOver?: number; estimate: string; quotationOnly?: boolean }
+export interface AdminDiscount { code: string; kind: "percent" | "fixed" | "free_shipping"; value: number; currency?: Currency; startsAt?: string; endsAt?: string; minSubtotal?: number; maxRedemptions?: number; perCustomerLimit?: number; firstPurchaseOnly?: boolean; redeemed: number; active: boolean }
 export interface AdminOrder extends ApiOrder { guestEmail: string | null; address: { recipient: string; region: string; city: string; street: string } }
 export type Client = ReturnType<typeof createClient>;

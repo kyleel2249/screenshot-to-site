@@ -1,10 +1,11 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import type { AdminOrder, AdminProduct } from "@/lib/api-client";
+import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone } from "@/lib/api-client";
 import { categories } from "@/lib/catalog";
 import { childrenOf, topLevel } from "@/lib/domain/categories";
 import { formatMoney } from "@/lib/domain/money";
+import { GHANA_REGIONS } from "@/lib/domain/regions";
 import { AVAILABILITY_LABEL, type Availability } from "@/lib/domain/status";
 import { labelOf, nextStatuses } from "@/lib/order-labels";
 import { Errors, Field, inputCls, Notice } from "@/components/Form";
@@ -20,7 +21,7 @@ export const Route = createFileRoute("/$portal")({
   component: Dashboard,
 });
 
-type Tab = "products" | "orders" | "audit";
+type Tab = "products" | "orders" | "shipping" | "discounts" | "audit";
 const AVAIL = Object.keys(AVAILABILITY_LABEL) as Availability[];
 
 function Dashboard() {
@@ -44,9 +45,9 @@ function Dashboard() {
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => setState("login"))}>Sign out</button>
       </header>
       <nav className="mt-6 flex gap-2" aria-label="Sections" role="tablist">
-        {(["products", "orders", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
+        {(["products", "orders", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
       </nav>
-      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : <Audit admin={admin} />}</div>
+      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
     </div>
   );
 }
@@ -157,4 +158,90 @@ function Orders({ admin }: { admin: Admin }) {
 function Audit({ admin }: { admin: Admin }) {
   const { data, errors } = useLoad(useCallback(() => admin.audit(), [admin]));
   return <div><Errors errors={errors} /><ol className="space-y-1 font-mono text-xs">{data?.map((e) => <li key={e.id}>{new Date(e.at).toISOString()} · {e.event}{e.actor ? ` · ${e.actor}` : ""}</li>)}</ol></div>;
+}
+
+const minor = (v: string) => Math.round(Number(v) * 100);
+const major = (n: number | undefined) => (n === undefined ? "" : (n / 100).toFixed(2));
+
+function Shipping({ admin }: { admin: Admin }) {
+  const { data, errors, reload, setErrors } = useLoad<AdminZone[]>(useCallback(() => admin.zones(), [admin]));
+  const blank = { id: "", name: "", currency: "GHS" as "GHS" | "USD", baseFee: "", perKgFee: "0", freeOver: "", estimate: "", quotationOnly: false, regions: [] as string[] };
+  const [f, setF] = useState(blank); const [msg, setMsg] = useState("");
+  const toggle = (r: string) => setF({ ...f, regions: f.regions.includes(r) ? f.regions.filter((x) => x !== r) : [...f.regions, r] });
+  async function save(e: React.FormEvent) {
+    e.preventDefault(); setMsg(""); setErrors([]);
+    const r = await admin.saveZone({ ...(f.id ? { id: f.id } : {}), name: f.name, currency: f.currency, regions: f.regions, baseFee: minor(f.baseFee), perKgFee: minor(f.perKgFee || "0"), ...(f.freeOver ? { freeOver: minor(f.freeOver) } : {}), estimate: f.estimate, quotationOnly: f.quotationOnly });
+    if (r.ok) { setMsg("Zone saved."); setF(blank); await reload(); } else setErrors(r.errors);
+  }
+  return (
+    <div className="space-y-6">
+      <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
+      <p className="text-sm text-muted-foreground">Delivery estimates are shown to customers as estimates, never guarantees. Checkout needs at least one zone.</p>
+      <ul className="divide-y divide-border text-sm">{data?.map((z) => (
+        <li key={z.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div><p className="font-semibold">{z.name} · {formatMoney({ amount: z.baseFee, currency: z.currency })}{z.quotationOnly && " · quotation only"}</p><p className="text-muted-foreground">{z.regions.join(", ")} · {z.estimate}</p></div>
+          <div className="flex gap-3">
+            <button className="underline" onClick={() => setF({ id: z.id, name: z.name, currency: z.currency, baseFee: major(z.baseFee), perKgFee: major(z.perKgFee), freeOver: major(z.freeOver), estimate: z.estimate, quotationOnly: !!z.quotationOnly, regions: z.regions })}>Edit</button>
+            <button className="underline text-destructive" onClick={() => { if (window.confirm(`Delete zone "${z.name}"?`)) void admin.deleteZone(z.id).then((r) => (r.ok ? reload() : setErrors(r.errors))); }}>Delete</button>
+          </div>
+        </li>))}{data && !data.length && <li className="py-3 text-muted-foreground">No delivery zones yet.</li>}</ul>
+      <form onSubmit={save} className="grid gap-3 rounded-lg border border-border p-4 sm:grid-cols-2">
+        <h2 className="font-display text-lg font-bold sm:col-span-2">{f.id ? "Edit zone" : "Add zone"}</h2>
+        <Field label="Name" required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+        <div><label htmlFor="z-cur" className="mb-1 block text-sm font-medium">Currency</label><select id="z-cur" className={inputCls} value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value as "GHS" | "USD" })}><option>GHS</option><option>USD</option></select></div>
+        <Field label="Base fee" type="number" step="0.01" min="0" required value={f.baseFee} onChange={(e) => setF({ ...f, baseFee: e.target.value })} />
+        <Field label="Extra fee per kg" type="number" step="0.01" min="0" value={f.perKgFee} onChange={(e) => setF({ ...f, perKgFee: e.target.value })} />
+        <Field label="Free delivery over (optional)" type="number" step="0.01" min="0" value={f.freeOver} onChange={(e) => setF({ ...f, freeOver: e.target.value })} />
+        <Field label="Delivery estimate" required hint="e.g. 1–2 working days" value={f.estimate} onChange={(e) => setF({ ...f, estimate: e.target.value })} />
+        <fieldset className="sm:col-span-2"><legend className="mb-1 text-sm font-medium">Regions served</legend>
+          <div className="grid grid-cols-2 gap-1 text-sm sm:grid-cols-4">{GHANA_REGIONS.map((r) => <label key={r} className="flex items-center gap-2"><input type="checkbox" checked={f.regions.includes(r)} onChange={() => toggle(r)} />{r}</label>)}</div>
+        </fieldset>
+        <label className="flex items-center gap-2 text-sm sm:col-span-2"><input type="checkbox" checked={f.quotationOnly} onChange={(e) => setF({ ...f, quotationOnly: e.target.checked })} /> Delivery cost is quoted individually</label>
+        <div className="flex gap-3 sm:col-span-2"><button className="btn-primary">Save zone</button>{f.id && <button type="button" className="underline" onClick={() => setF(blank)}>Cancel edit</button>}</div>
+      </form>
+    </div>
+  );
+}
+
+function Discounts({ admin }: { admin: Admin }) {
+  const { data, errors, reload, setErrors } = useLoad<AdminDiscount[]>(useCallback(() => admin.discounts(), [admin]));
+  const blank = { code: "", kind: "percent" as AdminDiscount["kind"], value: "", currency: "GHS" as "GHS" | "USD", startsAt: "", endsAt: "", minSubtotal: "", maxRedemptions: "", perCustomerLimit: "", firstPurchaseOnly: false };
+  const [f, setF] = useState(blank); const [msg, setMsg] = useState("");
+  const describe = (d: AdminDiscount) => d.kind === "percent" ? `${d.value / 100}% off` : d.kind === "fixed" ? `${formatMoney({ amount: d.value, currency: d.currency ?? "GHS" })} off` : "Free shipping";
+  async function save(e: React.FormEvent) {
+    e.preventDefault(); setMsg(""); setErrors([]);
+    const value = f.kind === "free_shipping" ? 0 : f.kind === "percent" ? Math.round(Number(f.value) * 100) : minor(f.value);
+    const r = await admin.saveDiscount({
+      code: f.code, kind: f.kind, value, ...(f.kind === "fixed" ? { currency: f.currency } : {}),
+      ...(f.startsAt ? { startsAt: new Date(f.startsAt).toISOString() } : {}), ...(f.endsAt ? { endsAt: new Date(f.endsAt).toISOString() } : {}),
+      ...(f.minSubtotal ? { minSubtotal: minor(f.minSubtotal) } : {}), ...(f.maxRedemptions ? { maxRedemptions: Number(f.maxRedemptions) } : {}), ...(f.perCustomerLimit ? { perCustomerLimit: Number(f.perCustomerLimit) } : {}),
+      ...(f.firstPurchaseOnly ? { firstPurchaseOnly: true } : {}),
+    });
+    if (r.ok) { setMsg("Discount saved."); setF(blank); await reload(); } else setErrors(r.errors);
+  }
+  return (
+    <div className="space-y-6">
+      <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
+      <ul className="divide-y divide-border text-sm">{data?.map((d) => (
+        <li key={d.code} className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div><p className="font-semibold">{d.code} · {describe(d)} {!d.active && <span className="badge-label ml-1">Off</span>}</p>
+            <p className="text-muted-foreground">Used {d.redeemed}{d.maxRedemptions !== undefined ? ` of ${d.maxRedemptions}` : ""} times{d.endsAt ? ` · ends ${new Date(d.endsAt).toLocaleDateString()}` : ""}</p></div>
+          <button className="underline" onClick={() => void admin.setDiscountActive(d.code, !d.active).then((r) => (r.ok ? reload() : setErrors(r.errors)))}>{d.active ? "Turn off" : "Turn on"}</button>
+        </li>))}{data && !data.length && <li className="py-3 text-muted-foreground">No discount codes yet.</li>}</ul>
+      <form onSubmit={save} className="grid gap-3 rounded-lg border border-border p-4 sm:grid-cols-2">
+        <h2 className="font-display text-lg font-bold sm:col-span-2">Add or update a code</h2>
+        <Field label="Code" required hint="3–32 letters, numbers, - or _" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} />
+        <div><label htmlFor="d-kind" className="mb-1 block text-sm font-medium">Type</label><select id="d-kind" className={inputCls} value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as AdminDiscount["kind"] })}><option value="percent">Percentage</option><option value="fixed">Fixed amount</option><option value="free_shipping">Free shipping</option></select></div>
+        {f.kind !== "free_shipping" && <Field label={f.kind === "percent" ? "Percent off" : "Amount off"} type="number" step="0.01" min="0" required value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} />}
+        {f.kind === "fixed" && <div><label htmlFor="d-cur" className="mb-1 block text-sm font-medium">Currency</label><select id="d-cur" className={inputCls} value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value as "GHS" | "USD" })}><option>GHS</option><option>USD</option></select></div>}
+        <Field label="Starts (optional)" type="datetime-local" value={f.startsAt} onChange={(e) => setF({ ...f, startsAt: e.target.value })} />
+        <Field label="Ends (optional)" type="datetime-local" value={f.endsAt} onChange={(e) => setF({ ...f, endsAt: e.target.value })} />
+        <Field label="Minimum subtotal (optional)" type="number" step="0.01" min="0" value={f.minSubtotal} onChange={(e) => setF({ ...f, minSubtotal: e.target.value })} />
+        <Field label="Total redemption limit (optional)" type="number" min="1" value={f.maxRedemptions} onChange={(e) => setF({ ...f, maxRedemptions: e.target.value })} />
+        <Field label="Limit per customer (optional)" type="number" min="1" value={f.perCustomerLimit} onChange={(e) => setF({ ...f, perCustomerLimit: e.target.value })} />
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.firstPurchaseOnly} onChange={(e) => setF({ ...f, firstPurchaseOnly: e.target.checked })} /> First purchase only</label>
+        <button className="btn-primary sm:col-span-2">Save discount</button>
+      </form>
+    </div>
+  );
 }

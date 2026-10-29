@@ -65,3 +65,45 @@ describe("api client against the real handler", () => {
     expect((await admin.setStatus([created.data!.id], "pre_order")).errors[0]).toMatch(/pre-orders/i);
   });
 });
+
+describe("shipping zones and discounts through the client", () => {
+  async function owner() {
+    const b = await browser();
+    await b.api.admin(PORTAL).enrol({ reference: "ref", email: "owner@shop.test", password: PW });
+    await b.api.verifyEmail(b.tokens[b.tokens.length - 1]!); await b.api.login("owner@shop.test", PW);
+    return { ...b, admin: b.api.admin(PORTAL) };
+  }
+  test("zones: validated, saved, public, editable, deletable", async () => {
+    const { api, admin } = await owner();
+    const bad = await admin.saveZone({ name: "", regions: ["Atlantis"], currency: "GHS", baseFee: -5, estimate: "" });
+    expect(bad.status).toBe(422); expect(bad.errors.join(" ")).toMatch(/Unknown region: Atlantis/);
+    const ok = await admin.saveZone({ name: "Accra", regions: ["Greater Accra"], currency: "GHS", baseFee: 2500, estimate: "1–2 days", freeOver: 50000 });
+    expect(ok.status).toBe(201);
+    const id = ok.data!.id;
+    expect((await api.zones()).data!.map((z) => z.name)).toContain("Accra");
+    expect((await admin.saveZone({ id, name: "Accra metro", regions: ["Greater Accra"], currency: "GHS", baseFee: 3000, estimate: "1–2 days" })).data!.baseFee).toBe(3000);
+    expect((await admin.zones()).data!.find((z) => z.id === id)!.freeOver).toBeUndefined();
+    expect((await admin.saveZone({ id: "nope", name: "x", regions: ["Volta"], currency: "GHS", baseFee: 1, estimate: "e" })).ok).toBe(false);
+    expect((await admin.deleteZone(id)).ok).toBe(true); expect((await admin.deleteZone(id)).status).toBe(422);
+  });
+  test("discounts: validated, never trust client redemption counts, toggle, and apply at checkout", async () => {
+    const { api, admin } = await owner();
+    expect((await admin.saveDiscount({ code: "x", kind: "percent", value: 500 })).status).toBe(422);
+    expect((await admin.saveDiscount({ code: "BAD", kind: "percent", value: 20000 })).status).toBe(422);
+    const d = await admin.saveDiscount({ code: "welcome10", kind: "percent", value: 1000, redeemed: 99 } as never);
+    expect(d.data).toMatchObject({ code: "WELCOME10", redeemed: 0, active: true });
+    const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 5, published: true });
+    const variantId = `${prod.data!.id}::CAP`;
+    const order = (code: string) => api.checkout({ lines: [{ variantId, qty: 1 }], currency: "GHS", region: "Greater Accra", zoneId: "z", guestEmail: "g@x.com", address: { recipient: "R", region: "Greater Accra", city: "A", street: "1" }, discountCode: code, idempotencyKey: `k-${code}-${Math.random()}`, acceptedTerms: true });
+    const withCode = await order("WELCOME10"); expect(withCode.data!.order.discount).toBe(1000);
+    await admin.setDiscountActive("WELCOME10", false);
+    expect((await order("WELCOME10")).ok).toBe(false);
+    expect((await admin.discounts()).data![0]).toMatchObject({ active: false, redeemed: 0 }); // redemptions count on verified payment, not on unpaid orders
+  });
+  test("a fulfilment user cannot read or change zones or discounts", async () => {
+    const { p, admin, api } = await owner();
+    await transact(p, (db) => { const u = [...db.users.values()].find((x) => x.email === "owner@shop.test")!; u.roles = ["fulfilment"]; });
+    await api.logout(); await api.login("owner@shop.test", PW);
+    for (const r of [await admin.zones(), await admin.discounts(), await admin.saveZone({ name: "a", regions: ["Volta"], currency: "GHS", baseFee: 1, estimate: "e" }), await admin.saveDiscount({ code: "ABC", kind: "free_shipping", value: 0 })]) expect(r.status).toBe(403);
+  });
+});
