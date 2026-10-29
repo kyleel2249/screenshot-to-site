@@ -3,7 +3,7 @@ import { categories, products } from "@/lib/catalog";
 import { ProductCard } from "@/components/ProductCard";
 
 export const Route = createFileRoute("/shop")({
-  validateSearch: (s: Record<string, unknown>): { category?: string } => ({
+  validateSearch: (s: Record<string, unknown>): { category?: string | undefined } => ({
     category: typeof s["category"] === "string" ? (s["category"] as string) : undefined,
   }),
   head: () => ({
