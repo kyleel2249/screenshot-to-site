@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { categories } from "@/lib/catalog";
 import { useCatalog } from "@/lib/catalog-store";
 import { useCart } from "@/lib/cart";
 import { useCurrency } from "@/lib/currency";
@@ -25,7 +24,7 @@ function NotFound() {
 
 function ProductPage() {
   const { slug } = Route.useParams();
-  const { products, status, reload } = useCatalog();
+  const { products, categories, status, reload } = useCatalog();
   const { add } = useCart();
   const { mode } = useCurrency();
   if (status === "loading") return <div className="container-x py-20 text-center text-muted-foreground" role="status">Loading…</div>;

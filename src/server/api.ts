@@ -19,7 +19,7 @@ import { ConflictError, transact, type Persistence } from "./persistence/transac
 import { addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
 import { adminStoreFor, authenticate, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
 import { exportOrdersCsv } from "./services/analytics";
-import { adjustStock, createProduct, setAvailability, setPrices, setPublishedState, ValidationError } from "./services/catalog-admin";
+import { adjustStock, categoryAdmin, createProduct, setAvailability, setPrices, setPublishedState, ValidationError } from "./services/catalog-admin";
 import { completeRefund, getOrderForCustomer, handleVerifiedPayment, listOrdersForCustomer, placeOrder, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "./services/orders";
 import { openTicket } from "./services/support";
 import type { OrderStatus } from "../lib/domain/commerce";
@@ -65,6 +65,8 @@ function publicProducts(db: MemoryDb, now = new Date()) {
   const out = [];
   for (const p of db.products.values()) {
     if (p.archived) continue;
+    const cat = db.categories.find((c) => c.id === p.categoryId); // hiding a category hides its products from the public list
+    if (cat && (!cat.published || (cat.parentId && db.categories.find((c) => c.id === cat.parentId)?.published === false))) continue;
     const v = [...db.variants.values()].find((x) => x.productId === p.id);
     if (!v || !v.published || (v.publishAt && new Date(v.publishAt) > now)) continue;
     const hasSale = !!v.salePrice;
@@ -170,6 +172,11 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
           const csv = await transact(p, (db) => exportOrdersCsv(db, actor));
           return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="orders.csv"', ...NO_STORE } });
         }
+        if (sub === "/categories" && req.method === "GET") return json(await transact(p, (db) => categoryAdmin(db, actor).list()));
+        if (sub === "/categories" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).add(str(body, "name"), str(body, "parentId") || null, (str(body, "filterProfile") || undefined) as never)); return json({ ok: true }, 201); }
+        if (sub === "/categories/rename" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).rename(str(body, "id"), str(body, "name"))); return json({ ok: true }); }
+        if (sub === "/categories/visibility" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).hide(str(body, "id"), bool(body, "hidden"))); return json({ ok: true }); }
+        if (sub === "/categories/move" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).move(str(body, "id"), num(body, "position"))); return json({ ok: true }); }
         if (sub === "/zones" && req.method === "GET") return json(await transact(p, (db) => listZones(db, actor)));
         if (sub === "/zones" && req.method === "POST") return json(await transact(p, (db) => saveZone(db, actor, body)), 201);
         if (sub === "/zones/delete" && req.method === "POST") { await transact(p, (db) => deleteZone(db, actor, str(body, "id"))); return json({ ok: true }); }
@@ -182,6 +189,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
     }
 
     /* ---------- public / customer API ---------- */
+    if (path === "/api/categories" && req.method === "GET") return json(await transact(p, (db) => db.categories.filter((c) => c.published && (!c.parentId || db.categories.find((x) => x.id === c.parentId)?.published))));
     if (path === "/api/shipping-zones" && req.method === "GET") return json(await transact(p, (db) => [...db.zones.values()].map((z) => ({ id: z.id, name: z.name, regions: z.regions, currency: z.currency, baseFee: z.baseFee, estimate: z.estimate }))));
     if (path === "/api/products" && req.method === "GET") return json(await transact(p, (db) => publicProducts(db)));
 

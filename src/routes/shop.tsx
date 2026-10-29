@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { categories, findBySlug } from "@/lib/catalog";
+import { findBySlug } from "@/lib/catalog";
 import { useCatalog } from "@/lib/catalog-store";
 import { productsIn, search, sortProducts } from "@/lib/storefront";
 import { childrenOf, topLevel, breadcrumb } from "@/lib/domain/categories";
@@ -30,8 +30,8 @@ export const Route = createFileRoute("/shop")({
 function Shop() {
   const { category, q, availability, sort } = Route.useSearch();
   const navigate = useNavigate({ from: "/shop" });
+  const { products, categories } = useCatalog();
   const cat = category ? findBySlug(categories, category) : undefined;
-  const { products } = useCatalog();
   let list = search(productsIn(products, categories, cat?.id), q ?? "");
   if (availability) list = list.filter((p) => p.availability === availability);
   list = sortProducts(list, sort);

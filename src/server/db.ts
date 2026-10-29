@@ -3,7 +3,7 @@
  * Production swaps in a D1/Postgres adapter exposing the same shape; services never touch storage directly.
  * Mutations inside one synchronous block are atomic here; a SQL adapter must wrap the same blocks in a transaction.
  */
-import type { CategoryNode } from "../lib/domain/categories";
+import { SEED_CATEGORIES, type CategoryNode } from "../lib/domain/categories";
 import type { Discount, OrderStatus, ShippingZone, VariantRecord } from "../lib/domain/commerce";
 import type { Currency } from "../lib/domain/money";
 import type { PromoWindow } from "../lib/domain/status";
@@ -33,7 +33,8 @@ export interface AuditRow { id: number; actor?: string; event: string; detail: R
 export class MemoryDb {
   products = new Map<string, ProductRow>();
   variants = new Map<string, VariantRecord>();
-  categories: CategoryNode[] = [];
+  /** A brand-new shop starts with the standard category tree; the owner can rename, hide, reorder and add from there. */
+  categories: CategoryNode[] = SEED_CATEGORIES.map((c) => ({ ...c }));
   users = new Map<string, UserRow>();
   profiles = new Map<string, ProfileRow>();
   addresses = new Map<string, AddressRow>();

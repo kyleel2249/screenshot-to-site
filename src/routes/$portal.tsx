@@ -2,8 +2,7 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone } from "@/lib/api-client";
-import { categories } from "@/lib/catalog";
-import { childrenOf, topLevel } from "@/lib/domain/categories";
+import { childrenOf, topLevel, type CategoryNode } from "@/lib/domain/categories";
 import { formatMoney } from "@/lib/domain/money";
 import { GHANA_REGIONS } from "@/lib/domain/regions";
 import { AVAILABILITY_LABEL, type Availability } from "@/lib/domain/status";
@@ -21,7 +20,7 @@ export const Route = createFileRoute("/$portal")({
   component: Dashboard,
 });
 
-type Tab = "products" | "orders" | "shipping" | "discounts" | "audit";
+type Tab = "products" | "orders" | "categories" | "shipping" | "discounts" | "audit";
 const AVAIL = Object.keys(AVAILABILITY_LABEL) as Availability[];
 
 function Dashboard() {
@@ -45,9 +44,9 @@ function Dashboard() {
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => setState("login"))}>Sign out</button>
       </header>
       <nav className="mt-6 flex gap-2" aria-label="Sections" role="tablist">
-        {(["products", "orders", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
+        {(["products", "orders", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
       </nav>
-      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
+      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
     </div>
   );
 }
@@ -86,6 +85,8 @@ function useLoad<T>(fn: () => Promise<{ ok: boolean; data: T | null; errors: str
 function Products({ admin }: { admin: Admin }) {
   const { data, errors, reload, setErrors } = useLoad<AdminProduct[]>(useCallback(() => admin.products(), [admin]));
   const [msg, setMsg] = useState("");
+  const cats = useLoad<CategoryNode[]>(useCallback(() => admin.categories(), [admin]));
+  const categories = cats.data ?? [];
   const act = async (fn: () => Promise<{ ok: boolean; errors: string[] }>, ok: string) => { setMsg(""); const r = await fn(); if (r.ok) { setMsg(ok); await reload(); } else setErrors(r.errors); };
   const [nw, setNw] = useState({ name: "", sku: "", categoryId: "", shortDescription: "", image: "", imageAlt: "", priceGhs: "", onHand: "0" });
   return (
@@ -241,6 +242,45 @@ function Discounts({ admin }: { admin: Admin }) {
         <Field label="Limit per customer (optional)" type="number" min="1" value={f.perCustomerLimit} onChange={(e) => setF({ ...f, perCustomerLimit: e.target.value })} />
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.firstPurchaseOnly} onChange={(e) => setF({ ...f, firstPurchaseOnly: e.target.checked })} /> First purchase only</label>
         <button className="btn-primary sm:col-span-2">Save discount</button>
+      </form>
+    </div>
+  );
+}
+
+function Categories({ admin }: { admin: Admin }) {
+  const { data, errors, reload, setErrors } = useLoad<CategoryNode[]>(useCallback(() => admin.categories(), [admin]));
+  const [msg, setMsg] = useState(""); const [name, setName] = useState(""); const [parent, setParent] = useState("");
+  const all = data ?? [];
+  const run = async (fn: () => Promise<{ ok: boolean; errors: string[] }>, ok: string) => { setMsg(""); setErrors([]); const r = await fn(); if (r.ok) { setMsg(ok); await reload(); } else setErrors(r.errors); };
+  const rename = (c: CategoryNode) => { const n = window.prompt("New name", c.name); if (n && n.trim() && n.trim() !== c.name) void run(() => admin.renameCategory(c.id, n), "Renamed."); };
+  const Row = ({ c, sibs, idx }: { c: CategoryNode; sibs: CategoryNode[]; idx: number }) => (
+    <li className="flex flex-wrap items-center justify-between gap-2 py-2">
+      <span className={c.published ? "" : "text-muted-foreground line-through"}>{c.name}{!c.published && " (hidden)"}</span>
+      <span className="flex gap-3 text-sm">
+        <button className="underline" disabled={idx === 0} aria-label={`Move ${c.name} up`} onClick={() => void run(() => admin.moveCategory(c.id, idx - 1), "Moved.")}>Up</button>
+        <button className="underline" disabled={idx === sibs.length - 1} aria-label={`Move ${c.name} down`} onClick={() => void run(() => admin.moveCategory(c.id, idx + 1), "Moved.")}>Down</button>
+        <button className="underline" onClick={() => rename(c)}>Rename</button>
+        <button className="underline" onClick={() => void run(() => admin.setCategoryHidden(c.id, c.published), c.published ? "Hidden from the shop, including its products." : "Visible again.")}>{c.published ? "Hide" : "Show"}</button>
+      </span>
+    </li>
+  );
+  const tops = all.filter((c) => c.parentId === null).sort((a, b) => a.position - b.position);
+  return (
+    <div className="space-y-6">
+      <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
+      <p className="text-sm text-muted-foreground">Hiding a category hides it, its subcategories and its products from the public shop. Nothing is deleted.</p>
+      <ul className="divide-y divide-border">
+        {all.filter((c) => c.parentId === null).sort((a, b) => a.position - b.position).map((c, i, arr) => {
+          const kids = all.filter((k) => k.parentId === c.id).sort((a, b) => a.position - b.position);
+          return (<li key={c.id}><ul><Row c={c} sibs={arr} idx={i} />{kids.length > 0 && <li><ul className="ml-6 divide-y divide-border border-l border-border pl-4">{kids.map((k, j) => <Row key={k.id} c={k} sibs={kids} idx={j} />)}</ul></li>}</ul></li>);
+        })}
+      </ul>
+      <form className="grid gap-3 rounded-lg border border-border p-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void run(() => admin.addCategory(name, parent || null), "Category added.").then(() => setName("")); }}>
+        <h2 className="font-display text-lg font-bold sm:col-span-2">Add category</h2>
+        <Field label="Name" required value={name} onChange={(e) => setName(e.target.value)} />
+        <div><label htmlFor="c-parent" className="mb-1 block text-sm font-medium">Parent</label>
+          <select id="c-parent" className={inputCls} value={parent} onChange={(e) => setParent(e.target.value)}><option value="">None (top level)</option>{tops.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
+        <button className="btn-primary sm:col-span-2">Add category</button>
       </form>
     </div>
   );

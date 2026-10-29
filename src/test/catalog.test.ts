@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { categories, business } from "@/lib/catalog";
+import { SEED_CATEGORIES as categories } from "@/lib/domain/categories";
+import { business } from "@/lib/catalog";
 import { addLine } from "@/lib/cart-core";
 import { canAdd, cheapestGhs, displayPrice, estimate, productsIn, search, sortProducts, type StoreProduct } from "@/lib/storefront";
 

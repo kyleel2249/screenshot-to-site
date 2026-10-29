@@ -3,12 +3,14 @@ import { ShoppingBag, Menu, X, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { useCart } from "@/lib/cart";
 import { useCurrency } from "@/lib/currency";
-import { business, categories } from "@/lib/catalog";
+import { business } from "@/lib/catalog";
+import { useCatalog } from "@/lib/catalog-store";
 import { childrenOf, topLevel } from "@/lib/domain/categories";
 import type { DisplayMode } from "@/lib/domain/money";
 
 export function SiteHeader() {
   const { count } = useCart();
+  const { categories } = useCatalog();
   const { mode, setMode } = useCurrency();
   const [open, setOpen] = useState(false);
   const tops = topLevel(categories);
@@ -71,6 +73,7 @@ export function SiteHeader() {
 }
 
 export function SiteFooter() {
+  const { categories } = useCatalog();
   const info = [
     { to: "/about", label: "About" }, { to: "/faq", label: "FAQ" },
     { to: "/policies/$slug", params: { slug: "shipping" }, label: "Shipping & delivery" },

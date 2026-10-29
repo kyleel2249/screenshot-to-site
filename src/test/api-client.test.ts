@@ -107,3 +107,44 @@ describe("shipping zones and discounts through the client", () => {
     for (const r of [await admin.zones(), await admin.discounts(), await admin.saveZone({ name: "a", regions: ["Volta"], currency: "GHS", baseFee: 1, estimate: "e" }), await admin.saveDiscount({ code: "ABC", kind: "free_shipping", value: 0 })]) expect(r.status).toBe(403);
   });
 });
+
+describe("category administration through the client", () => {
+  async function owner() {
+    const p = new MemoryPersistence();
+    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref") };
+    const tokens: string[] = []; let jar = "";
+    const fetchImpl = async (url: string, init: RequestInit = {}) => {
+      const headers = new Headers(init.headers); headers.set("cf-connecting-ip", `10.2.0.${++n}`); if (jar) headers.set("cookie", jar);
+      const res = await handle(new Request(ORIGIN + url, { ...init, headers }), env, p, { mail: async (_t, _tpl, d) => { tokens.push(d.token); } });
+      const sc = res.headers.get("set-cookie"); if (sc) jar = sc.split(";")[0]!.endsWith("=") ? "" : sc.split(";")[0]!;
+      return res;
+    };
+    const api = createClient({ fetchImpl, origin: ORIGIN }); const admin = api.admin(PORTAL);
+    await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await api.verifyEmail(tokens.at(-1)!); await api.login("owner@shop.test", PW);
+    return { api, admin, p };
+  }
+  test("a brand-new shop already has the standard categories, so the first product can be added", async () => {
+    const { api, admin } = await owner();
+    expect((await api.categories()).data!.length).toBeGreaterThan(14);
+    const r = await admin.createProduct({ name: "First", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "F1", priceGhs: 100, onHand: 1, published: true });
+    expect(r.ok).toBe(true);
+  });
+  test("add, rename, hide (children hidden too), move; bad input is 422 not 500", async () => {
+    const { api, admin } = await owner();
+    const top = (await admin.categories()).data!.find((c) => c.parentId === null)!;
+    expect((await admin.addCategory("Gadgets Plus", top.id)).ok).toBe(true);
+    const added = (await admin.categories()).data!.find((c) => c.name === "Gadgets Plus")!;
+    expect(added.parentId).toBe(top.id);
+    expect((await admin.renameCategory(added.id, "Gadgets Pro")).ok).toBe(true);
+    expect((await api.categories()).data!.some((c) => c.name === "Gadgets Pro")).toBe(true);
+    expect((await admin.addCategory("Too deep", added.id)).errors[0]).toMatch(/two levels/);
+    expect((await admin.renameCategory("cat-nope", "x")).status).toBe(422);
+    expect((await admin.renameCategory(added.id, "  ")).status).toBe(422);
+    expect((await admin.addCategory("x", "cat-nope")).status).toBe(422);
+    await admin.setCategoryHidden(top.id, true);
+    const pub = (await api.categories()).data!;
+    expect(pub.some((c) => c.id === top.id)).toBe(false); expect(pub.some((c) => c.id === added.id)).toBe(false); // children of a hidden parent are hidden too
+    expect((await admin.categories()).data!.some((c) => c.id === top.id)).toBe(true); // staff still see it
+    expect((await admin.moveCategory(added.id, 0)).ok).toBe(true); expect((await admin.moveCategory("cat-nope", 0)).status).toBe(422);
+  });
+});

@@ -1,7 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ShieldCheck, Truck, Package, Headphones } from "lucide-react";
 import hero from "@/assets/hero.jpg";
-import { categories } from "@/lib/catalog";
 import { useCatalog } from "@/lib/catalog-store";
 import { hasLabel, productsIn, sortProducts } from "@/lib/storefront";
 import { topLevel } from "@/lib/domain/categories";
@@ -20,7 +19,7 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  const { products, status } = useCatalog();
+  const { products, categories, status } = useCatalog();
   const fresh = sortProducts(products.filter((p) => hasLabel(p, "new_arrival") || hasLabel(p, "just_landed")), "newest");
   const arrivals = (fresh.length ? fresh : sortProducts(products, "newest")).slice(0, 4);
   const trust = [

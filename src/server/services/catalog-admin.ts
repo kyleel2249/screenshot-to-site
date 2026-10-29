@@ -103,12 +103,24 @@ export function archiveProduct(db: MemoryDb, actor: Actor | null, productId: str
   db.log("product.archived", { productId }, actor.id);
 }
 
+/** Domain errors from category operations become 422 validation errors, never 500s; permission errors pass through. */
+function guarded<T>(fn: () => T): T {
+  try { return fn(); } catch (e) {
+    if (e instanceof Error && e.name !== "Forbidden" && !(e instanceof ValidationError)) throw new ValidationError([e.message]);
+    throw e;
+  }
+}
 export function categoryAdmin(db: MemoryDb, actor: Actor | null) {
   requirePermission(actor, "category.write");
+  const exists = (id: string) => { if (!db.categories.some((c) => c.id === id)) throw new Error("Unknown category."); };
   return {
-    add: (name: string, parentId: string | null, filterProfile?: FilterProfile) => { db.categories = addCategory(db.categories, { name, parentId, ...(filterProfile ? { filterProfile } : {}) }); db.log("category.added", { name }, actor.id); },
-    rename: (id: string, name: string) => { db.categories = renameCategory(db.categories, id, name); db.log("category.renamed", { id }, actor.id); },
-    hide: (id: string, hidden: boolean) => { db.categories = setPublished(db.categories, id, !hidden); db.log("category.visibility", { id, hidden }, actor.id); },
-    move: (id: string, position: number) => { db.categories = reorder(db.categories, id, position); db.log("category.reordered", { id, position }, actor.id); },
+    list: () => db.categories,
+    add: (name: string, parentId: string | null, filterProfile?: FilterProfile) => guarded(() => {
+      if (parentId !== null) { exists(parentId); if (db.categories.find((c) => c.id === parentId)?.parentId) throw new Error("Categories can be at most two levels deep."); }
+      db.categories = addCategory(db.categories, { name, parentId, ...(filterProfile ? { filterProfile } : {}) }); db.log("category.added", { name }, actor.id);
+    }),
+    rename: (id: string, name: string) => guarded(() => { exists(id); db.categories = renameCategory(db.categories, id, name); db.log("category.renamed", { id }, actor.id); }),
+    hide: (id: string, hidden: boolean) => guarded(() => { exists(id); db.categories = setPublished(db.categories, id, !hidden); db.log("category.visibility", { id, hidden }, actor.id); }),
+    move: (id: string, position: number) => guarded(() => { exists(id); db.categories = reorder(db.categories, id, position); db.log("category.reordered", { id, position }, actor.id); }),
   };
 }

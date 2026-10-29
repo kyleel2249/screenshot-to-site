@@ -4,6 +4,7 @@
  */
 import type { Availability, PromoLabel } from "./domain/status";
 import type { Currency } from "./domain/money";
+import type { CategoryNode, FilterProfile } from "./domain/categories";
 
 export interface ApiProduct {
   slug: string; name: string; categoryId: string; createdAt: string; shortDescription: string; image: string; imageAlt: string;
@@ -37,6 +38,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
   const post = <T,>(p: string, b: unknown = {}) => call<T>("POST", p, b);
   return {
     products: () => get<ApiProduct[]>("/api/products"),
+    categories: () => get<CategoryNode[]>("/api/categories"),
     zones: () => get<{ id: string; name: string; regions: string[]; currency: Currency; baseFee: number; estimate: string }[]>("/api/shipping-zones"),
     support: (b: { email: string; subject: string; body: string }) => post<{ id: string }>("/api/support", b),
     register: (b: { email: string; password: string; firstName: string; lastName: string; acceptTerms: boolean; marketingConsent?: boolean }) => post<{ ok: true }>("/api/register", b),
@@ -69,6 +71,11 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
       setOrderStatus: (orderId: string, to: string, note?: string) => post(`${portal}/api/orders/status`, { orderId, to, ...(note ? { note } : {}) }),
       reauth: (password: string) => post(`${portal}/api/reauth`, { password }),
       refund: (orderId: string, amount: number) => post<{ amount: number; currency: string }>(`${portal}/api/refunds`, { orderId, amount }),
+      categories: () => get<CategoryNode[]>(`${portal}/api/categories`),
+      addCategory: (name: string, parentId: string | null, filterProfile?: FilterProfile) => post(`${portal}/api/categories`, { name, ...(parentId ? { parentId } : {}), ...(filterProfile ? { filterProfile } : {}) }),
+      renameCategory: (id: string, name: string) => post(`${portal}/api/categories/rename`, { id, name }),
+      setCategoryHidden: (id: string, hidden: boolean) => post(`${portal}/api/categories/visibility`, { id, hidden }),
+      moveCategory: (id: string, position: number) => post(`${portal}/api/categories/move`, { id, position }),
       zones: () => get<AdminZone[]>(`${portal}/api/zones`),
       saveZone: (b: Partial<AdminZone> & { name: string; regions: string[]; currency: Currency; baseFee: number; estimate: string }) => post<AdminZone>(`${portal}/api/zones`, b),
       deleteZone: (id: string) => post(`${portal}/api/zones/delete`, { id }),
