@@ -12,6 +12,7 @@ interface Ctx {
   add: (variantId: string) => AddResult;
   setQty: (variantId: string, qty: number) => AddResult;
   remove: (variantId: string) => void;
+  clear: () => void;
   count: number;
 }
 const CartCtx = createContext<Ctx | null>(null);
@@ -49,6 +50,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       return g;
     },
     remove: (id) => persist(lines.filter((l) => l.variantId !== id)),
+    clear: () => persist([]),
     count: lines.reduce((s, l) => s + l.qty, 0),
   };
   return <CartCtx.Provider value={value}>{children}</CartCtx.Provider>;

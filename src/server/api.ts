@@ -135,6 +135,15 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       const { actor, sid } = await who();
       if (!actor || actor.kind !== "staff") return notFound(); // unauthenticated probes learn nothing
       try {
+        if (sub === "/me" && req.method === "GET") return json({ id: actor.id, roles: actor.roles });
+        if (sub === "/products" && req.method === "GET") {
+          requirePermission(actor, "product.read");
+          return json(await transact(p, (db) => [...db.products.values()].map((pr) => {
+            const v = [...db.variants.values()].find((x) => x.productId === pr.id);
+            return { id: pr.id, slug: pr.slug, name: pr.name, archived: pr.archived, variantId: v?.id ?? null, sku: v?.id.split("::")[1] ?? null, availability: v?.availability ?? null, published: v?.published ?? false,
+              price: v?.price ?? {}, salePrice: v?.salePrice ?? null, onHand: v?.onHand ?? 0, reserved: v?.reserved ?? 0, preOrderEnabled: !!v?.preOrder?.enabled };
+          })));
+        }
         if (sub === "/reauth" && req.method === "POST") return (await transact(p, (db) => reauthenticate(db, sid!, str(body, "password")))) ? json({ ok: true }) : json({ error: "Incorrect password" }, 401);
         if (sub === "/products" && req.method === "POST") {
           const prod = await transact(p, (db) => createProduct(db, actor, body as never));
@@ -166,6 +175,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
     }
 
     /* ---------- public / customer API ---------- */
+    if (path === "/api/shipping-zones" && req.method === "GET") return json(await transact(p, (db) => [...db.zones.values()].map((z) => ({ id: z.id, name: z.name, regions: z.regions, currency: z.currency, baseFee: z.baseFee, estimate: z.estimate }))));
     if (path === "/api/products" && req.method === "GET") return json(await transact(p, (db) => publicProducts(db)));
 
     if (path === "/api/register" && req.method === "POST") {
@@ -204,7 +214,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       const a = (body["address"] && typeof body["address"] === "object" ? body["address"] : {}) as Body;
       const guestEmail = str(body, "guestEmail");
       const r = await transact(p, (db) => placeOrder(db, {
-        ...(actor?.kind === "customer" ? { userId: actor.id } : {}), ...(!actor && guestEmail ? { guestEmail } : {}),
+        ...(actor?.kind === "customer" ? { userId: actor.id } : {}), ...(actor?.kind !== "customer" && guestEmail ? { guestEmail } : {}),
         lines, currency: cur as Currency, region: str(body, "region"), zoneId: str(body, "zoneId"),
         address: { recipient: str(a, "recipient"), region: str(a, "region"), city: str(a, "city"), street: str(a, "street"), ...(str(a, "phone") ? { phone: str(a, "phone") } : {}) },
         ...(str(body, "discountCode") ? { discountCode: str(body, "discountCode") } : {}), idempotencyKey: str(body, "idempotencyKey"), acceptedTerms: bool(body, "acceptedTerms"), preorderAcknowledged: bool(body, "preorderAcknowledged"),

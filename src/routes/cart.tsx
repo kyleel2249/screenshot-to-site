@@ -81,7 +81,7 @@ function Cart() {
           </dl>
         )}
         <p className="mt-2 text-xs text-muted-foreground">Delivery and taxes are confirmed at checkout. Prices are re-checked against live stock.</p>
-        <button className="btn-primary mt-6 w-full opacity-60" disabled title="Checkout requires a configured payment provider and database">Checkout unavailable until payments are connected</button>
+        <Link to="/checkout" className="btn-primary mt-6 w-full">Proceed to checkout</Link>
         <Link to="/contact" className="mt-3 block text-center text-sm text-primary hover:underline">Order by contacting us</Link>
       </aside>
     </div>
