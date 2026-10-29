@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import type { ApiOrder } from "@/lib/api-client";
+import type { ApiOrder, Ticket } from "@/lib/api-client";
 import { formatMoney } from "@/lib/domain/money";
 import { labelOf } from "@/lib/order-labels";
 import { Errors, Field, inputCls, Notice, Page } from "@/components/Form";
@@ -18,6 +18,7 @@ function Account() {
   const nav = useNavigate();
   const [me, setMe] = useState<Profile | null | undefined>(undefined);
   const [orders, setOrders] = useState<ApiOrder[]>([]); const [addrs, setAddrs] = useState<Address[]>([]);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [msg, setMsg] = useState(""); const [errors, setErrors] = useState<string[]>([]);
   const [p, setP] = useState({ firstName: "", lastName: "", phone: "" });
   const [a, setA] = useState({ recipient: "", region: "", city: "", street: "" });
@@ -26,7 +27,8 @@ function Account() {
     const m = await api.me();
     if (!m.ok || !m.data) { setMe(null); return; }
     setMe(m.data as Profile); setP({ firstName: m.data.firstName, lastName: m.data.lastName, phone: (m.data as Profile).phone ?? "" });
-    const [o, ad] = await Promise.all([api.orders(), api.addresses()]);
+    const [o, ad, tk] = await Promise.all([api.orders(), api.addresses(), api.myTickets()]);
+    if (tk.data) setTickets(tk.data);
     if (o.data) setOrders(o.data); if (ad.data) setAddrs(ad.data as Address[]);
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -80,6 +82,12 @@ function Account() {
             <div className="flex items-center gap-3"><span className="font-semibold">{formatMoney({ amount: o.total, currency: o.currency })}</span>
               {["pending_payment", "payment_confirmed", "processing"].includes(o.status) && <button className="underline" onClick={() => void run(() => api.cancelOrder(o.id), "Cancellation requested.")}>Request cancellation</button>}</div>
           </li>))}{!orders.length && <li className="py-3 text-muted-foreground">No orders yet.</li>}</ul>
+      </section>
+      <section aria-labelledby="msgs"><h2 id="msgs" className="font-display text-xl font-bold">Messages</h2>
+        <ul className="mt-3 space-y-4 text-sm">{tickets.map((t) => (
+          <li key={t.id} className="rounded-md border border-border p-4"><p className="font-semibold">{t.subject} <span className="badge-label ml-2">{t.status}</span></p>
+            <ol className="mt-2 space-y-2">{t.messages.map((m) => <li key={`${m.at}${m.author}`}><span className="text-xs text-muted-foreground">{m.author === "customer" ? "You" : "Dera Darko Trade"} · {new Date(m.at).toLocaleString()}</span><p className="whitespace-pre-wrap">{m.body}</p></li>)}</ol></li>))}
+          {!tickets.length && <li className="text-muted-foreground">No messages. <Link to="/contact" className="underline">Contact us</Link>.</li>}</ul>
       </section>
       <section className="flex flex-wrap gap-3 border-t border-border pt-6" aria-label="Privacy and session">
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void download()}>Download my data</button>

@@ -148,3 +148,83 @@ describe("category administration through the client", () => {
     expect((await admin.moveCategory(added.id, 0)).ok).toBe(true); expect((await admin.moveCategory("cat-nope", 0)).status).toBe(422);
   });
 });
+
+async function ownerSession() {
+  const p = new MemoryPersistence();
+  const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref") };
+  await transact(p, (db) => { db.zones.set("z", { id: "z", name: "z", regions: ["Greater Accra"], currency: "GHS", baseFee: 2000, perKgFee: 0, estimate: "est" }); });
+  const tokens: string[] = [];
+  const mk = () => {
+    let jar = "";
+    const fetchImpl = async (url: string, init: RequestInit = {}) => {
+      const headers = new Headers(init.headers); headers.set("cf-connecting-ip", `10.3.0.${++n}`); if (jar) headers.set("cookie", jar);
+      const res = await handle(new Request(ORIGIN + url, { ...init, headers }), env, p, { mail: async (_t, _tpl, d) => { tokens.push(d.token); } });
+      const sc = res.headers.get("set-cookie"); if (sc) jar = sc.split(";")[0]!.endsWith("=") ? "" : sc.split(";")[0]!;
+      return res;
+    };
+    return createClient({ fetchImpl, origin: ORIGIN });
+  };
+  const staff = mk(); const admin = staff.admin(PORTAL);
+  await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await staff.verifyEmail(tokens.at(-1)!); await staff.login("owner@shop.test", PW);
+  return { p, staff, admin, shopper: mk, tokens };
+}
+
+describe("support inbox, analytics and hidden categories", () => {
+  test("a customer message reaches staff, the reply is visible to that customer only, internal notes never are", async () => {
+    const { admin, shopper, tokens } = await ownerSession();
+    const alice = shopper(); const bob = shopper();
+    await alice.register({ email: "alice@x.com", password: PW, firstName: "A", lastName: "A", acceptTerms: true }); await alice.verifyEmail(tokens.at(-1)!); await alice.login("alice@x.com", PW);
+    expect((await alice.support({ email: "alice@x.com", subject: "Where is my order?", body: "Hello" })).ok).toBe(true);
+    expect((await alice.support({ email: "bad", subject: "", body: "" })).status).toBe(422);
+    const [t] = (await admin.tickets()).data!; expect(t).toMatchObject({ subject: "Where is my order?", status: "open" });
+    await admin.replyTicket(t!.id, "Checking now."); await admin.replyTicket(t!.id, "Customer seems upset — escalate", true);
+    expect((await admin.replyTicket(t!.id, "   ")).status).toBe(422); expect((await admin.replyTicket("nope", "x")).status).toBe(422);
+    const mine = (await alice.myTickets()).data!; expect(mine).toHaveLength(1);
+    expect(mine[0]!.messages.map((m) => m.body)).toEqual(["Hello", "Checking now."]); // internal note stripped
+    expect((await bob.myTickets()).status).toBe(401);
+    await admin.setTicketStatus(t!.id, "resolved"); expect((await admin.tickets()).data![0]!.status).toBe("resolved");
+    expect((await admin.setTicketStatus(t!.id, "weird" as never)).status).toBe(422);
+  });
+  test("analytics: nothing recorded without consent, PII and purchase events refused, revenue only from verified paid orders", async () => {
+    const { admin, shopper, p } = await ownerSession();
+    const v = shopper();
+    expect((await v.event({ consent: false, kind: "page_view", path: "/shop" })).data).toEqual({ recorded: false });
+    expect((await v.event({ consent: true, kind: "page_view", path: "/shop" })).data).toEqual({ recorded: true });
+    expect((await v.event({ consent: true, kind: "product_view", path: "/product/cap" })).data).toEqual({ recorded: true });
+    expect((await v.event({ consent: true, kind: "page_view", path: "/shop?e=a@b.co" })).data).toEqual({ recorded: false });
+    expect((await v.event({ consent: true, kind: "purchase" })).data).toEqual({ recorded: false });
+    expect((await v.event({ consent: true, kind: "who_knows" })).data).toEqual({ recorded: false });
+    const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 5, published: true });
+    const co = await v.checkout({ lines: [{ variantId: `${prod.data!.id}::CAP`, qty: 1 }], currency: "GHS", region: "Greater Accra", zoneId: "z", guestEmail: "g@x.com", address: { recipient: "R", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: "k1", acceptedTerms: true });
+    let a = (await admin.analytics(30)).data!; expect(a.funnel).toMatchObject({ productViews: 1, paidOrders: 0 }); expect(a.revenue).toEqual({}); // unpaid ≠ revenue
+    await transact(p, (db) => { const o = [...db.orders.values()][0]!; o.status = "payment_confirmed"; });
+    a = (await admin.analytics(30)).data!; expect(a.revenue["GHS"]).toMatchObject({ gross: co.data!.order.total, net: co.data!.order.total, orders: 1 }); expect(a.funnel.paidOrders).toBe(1);
+  });
+  test("hiding a category removes its products from the public list; staff analytics need permission", async () => {
+    const { admin, staff, p, shopper } = await ownerSession();
+    const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 5, published: true });
+    expect((await shopper().products()).data!.map((x) => x.slug)).toContain(prod.data!.slug);
+    await admin.setCategoryHidden("cat-shoes-and-footwear", true);
+    expect((await shopper().products()).data).toEqual([]);
+    await admin.setCategoryHidden("cat-shoes-and-footwear", false);
+    expect((await shopper().products()).data).toHaveLength(1);
+    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["fulfilment"]; });
+    await staff.logout(); await staff.login("owner@shop.test", PW);
+    expect((await admin.analytics()).status).toBe(403); expect((await admin.tickets()).status).toBe(403);
+  });
+});
+
+describe("orders CSV export", () => {
+  test("needs recent re-authentication, then returns a formula-safe CSV", async () => {
+    const { admin, shopper, p } = await ownerSession();
+    const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 5, published: true });
+    await shopper().checkout({ lines: [{ variantId: `${prod.data!.id}::CAP`, qty: 1 }], currency: "GHS", region: "Greater Accra", zoneId: "z", guestEmail: "g@x.com", address: { recipient: "=cmd()", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: "k9", acceptedTerms: true });
+    await transact(p, (db) => { for (const s of db.sessions.values()) s.authAt = 0; }); // simulate an old sign-in
+    const denied = await admin.exportOrdersCsv(); expect(denied).toMatchObject({ ok: false, status: 403 }); expect(denied.errors[0]).toMatch(/re-?auth/i);
+    expect((await admin.reauth("wrong-password")).ok).toBe(false);
+    expect((await admin.reauth(PW)).ok).toBe(true);
+    const ok = await admin.exportOrdersCsv(); expect(ok.ok).toBe(true);
+    expect(ok.data!.split("\n")[0]).toBe("ref,status,currency,total_minor,created"); expect(ok.data!.split("\n")).toHaveLength(2);
+    expect(ok.data).not.toContain("g@x.com"); expect(ok.data).not.toContain("cmd"); // no customer PII in the export
+  });
+});

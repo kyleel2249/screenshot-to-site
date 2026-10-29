@@ -18,10 +18,10 @@ import { Forbidden, requirePermission, type Actor } from "./rbac";
 import { ConflictError, transact, type Persistence } from "./persistence/transact";
 import { addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
 import { adminStoreFor, authenticate, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
-import { exportOrdersCsv } from "./services/analytics";
+import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
+import { listTickets, myTickets, openTicket, setTicketStatus, staffReply } from "./services/support";
 import { adjustStock, categoryAdmin, createProduct, setAvailability, setPrices, setPublishedState, ValidationError } from "./services/catalog-admin";
 import { completeRefund, getOrderForCustomer, handleVerifiedPayment, listOrdersForCustomer, placeOrder, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "./services/orders";
-import { openTicket } from "./services/support";
 import type { OrderStatus } from "../lib/domain/commerce";
 import type { Availability } from "../lib/domain/status";
 
@@ -177,6 +177,15 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         if (sub === "/categories/rename" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).rename(str(body, "id"), str(body, "name"))); return json({ ok: true }); }
         if (sub === "/categories/visibility" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).hide(str(body, "id"), bool(body, "hidden"))); return json({ ok: true }); }
         if (sub === "/categories/move" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).move(str(body, "id"), num(body, "position"))); return json({ ok: true }); }
+        if (sub === "/tickets" && req.method === "GET") return json(await transact(p, (db) => listTickets(db, actor)));
+        if (sub === "/tickets/reply" && req.method === "POST") { await transact(p, (db) => staffReply(db, actor, str(body, "ticketId"), str(body, "body"), bool(body, "internal"))); return json({ ok: true }); }
+        if (sub === "/tickets/status" && req.method === "POST") { await transact(p, (db) => setTicketStatus(db, actor, str(body, "ticketId"), str(body, "status") as never)); return json({ ok: true }); }
+        if (sub === "/analytics" && req.method === "GET") {
+          requirePermission(actor, "analytics.read");
+          const days = Math.min(365, Math.max(1, parseInt(url.searchParams.get("days") ?? "30", 10) || 30));
+          const to = Date.now(), from = to - days * 86_400_000;
+          return json(await transact(p, (db) => ({ days, funnel: funnel(db, from, to), revenue: revenue(db, actor, from, to) })));
+        }
         if (sub === "/zones" && req.method === "GET") return json(await transact(p, (db) => listZones(db, actor)));
         if (sub === "/zones" && req.method === "POST") return json(await transact(p, (db) => saveZone(db, actor, body)), 201);
         if (sub === "/zones/delete" && req.method === "POST") { await transact(p, (db) => deleteZone(db, actor, str(body, "id"))); return json({ ok: true }); }
@@ -189,6 +198,11 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
     }
 
     /* ---------- public / customer API ---------- */
+    if (path === "/api/events" && req.method === "POST") {
+      // Consent-gated, allow-listed, pseudonymised (see services/analytics.ts). Always 200 so the endpoint reveals nothing.
+      const recorded = await transact(p, (db) => track(db, { consent: bool(body, "consent"), kind: str(body, "kind"), path: str(body, "path"), source: str(body, "source"), campaign: str(body, "campaign"), clientKey: ip, secret: env.SESSION_SECRET }));
+      return json({ recorded });
+    }
     if (path === "/api/categories" && req.method === "GET") return json(await transact(p, (db) => db.categories.filter((c) => c.published && (!c.parentId || db.categories.find((x) => x.id === c.parentId)?.published))));
     if (path === "/api/shipping-zones" && req.method === "GET") return json(await transact(p, (db) => [...db.zones.values()].map((z) => ({ id: z.id, name: z.name, regions: z.regions, currency: z.currency, baseFee: z.baseFee, estimate: z.estimate }))));
     if (path === "/api/products" && req.method === "GET") return json(await transact(p, (db) => publicProducts(db)));
@@ -252,6 +266,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
     if (path.startsWith("/api/") && ["/api/me", "/api/orders", "/api/account"].some((x) => path === x || path.startsWith(x + "/"))) {
       if (!actor || actor.kind !== "customer") return json({ error: "Not signed in" }, 401);
       if (path === "/api/me") return json(await transact(p, (db) => getProfile(db, actor)));
+      if (path === "/api/account/tickets" && req.method === "GET") return json(await transact(p, (db) => myTickets(db, actor)));
       if (path === "/api/orders" && req.method === "GET") return json(await transact(p, (db) => listOrdersForCustomer(db, actor).map(orderView)));
       const m = /^\/api\/orders\/([^/]+)(\/cancel)?$/.exec(path);
       if (m) {

@@ -5,6 +5,7 @@ import { useCart } from "@/lib/cart";
 import { useCurrency } from "@/lib/currency";
 import { business } from "@/lib/catalog";
 import { useCatalog } from "@/lib/catalog-store";
+import { ConsentLink } from "@/components/ConsentBanner";
 import { childrenOf, topLevel } from "@/lib/domain/categories";
 import type { DisplayMode } from "@/lib/domain/money";
 
@@ -100,6 +101,7 @@ export function SiteFooter() {
           <p className="text-sm font-semibold text-gold">Information</p>
           <ul className="mt-3 space-y-2 text-sm text-primary-foreground/80">
             {info.map((i) => <li key={i.label}>{"params" in i ? <Link to={i.to} params={i.params}>{i.label}</Link> : <Link to={i.to}>{i.label}</Link>}</li>)}
+            <li><ConsentLink className="underline-offset-2 hover:underline" /></li>
           </ul>
         </div>
         <div>

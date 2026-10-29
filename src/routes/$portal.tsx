@@ -1,7 +1,7 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone } from "@/lib/api-client";
+import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone, Analytics, Ticket } from "@/lib/api-client";
 import { childrenOf, topLevel, type CategoryNode } from "@/lib/domain/categories";
 import { formatMoney } from "@/lib/domain/money";
 import { GHANA_REGIONS } from "@/lib/domain/regions";
@@ -20,7 +20,7 @@ export const Route = createFileRoute("/$portal")({
   component: Dashboard,
 });
 
-type Tab = "products" | "orders" | "categories" | "shipping" | "discounts" | "audit";
+type Tab = "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
 const AVAIL = Object.keys(AVAILABILITY_LABEL) as Availability[];
 
 function Dashboard() {
@@ -44,9 +44,9 @@ function Dashboard() {
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => setState("login"))}>Sign out</button>
       </header>
       <nav className="mt-6 flex gap-2" aria-label="Sections" role="tablist">
-        {(["products", "orders", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
+        {(["products", "orders", "support", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
       </nav>
-      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
+      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
     </div>
   );
 }
@@ -141,6 +141,11 @@ function Orders({ admin }: { admin: Admin }) {
     <div className="space-y-4">
       <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
       {need && <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void admin.reauth(pw).then((r) => { if (r.ok) { setNeed(false); setPw(""); setErrors([]); setMsg("Re-authenticated. Retry the action."); } else setErrors(r.errors); }); }}><input aria-label="Confirm your password" type="password" autoComplete="current-password" className={inputCls} value={pw} onChange={(e) => setPw(e.target.value)} /><button className="btn-primary">Confirm</button></form>}
+      <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void act(async () => {
+        const r = await admin.exportOrdersCsv();
+        if (r.ok && r.data) { const url = URL.createObjectURL(new Blob([r.data], { type: "text/csv" })); const a = document.createElement("a"); a.href = url; a.download = "orders.csv"; a.click(); URL.revokeObjectURL(url); }
+        return r;
+      }, "Orders exported.")}>Export orders (CSV)</button>
       <ul className="divide-y divide-border">{data?.map((o) => (
         <li key={o.id} className="space-y-2 py-4 text-sm">
           <div className="flex flex-wrap justify-between gap-2"><p className="font-semibold">{o.ref} · {labelOf(o.status)}</p><p>{formatMoney({ amount: o.total, currency: o.currency })}</p></div>
@@ -282,6 +287,62 @@ function Categories({ admin }: { admin: Admin }) {
           <select id="c-parent" className={inputCls} value={parent} onChange={(e) => setParent(e.target.value)}><option value="">None (top level)</option>{tops.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</select></div>
         <button className="btn-primary sm:col-span-2">Add category</button>
       </form>
+    </div>
+  );
+}
+
+function Support({ admin }: { admin: Admin }) {
+  const { data, errors, reload, setErrors } = useLoad<Ticket[]>(useCallback(() => admin.tickets(), [admin]));
+  const [open, setOpen] = useState<string | null>(null); const [reply, setReply] = useState(""); const [internal, setInternal] = useState(false); const [msg, setMsg] = useState("");
+  const run = async (fn: () => Promise<{ ok: boolean; errors: string[] }>, ok: string) => { setMsg(""); setErrors([]); const r = await fn(); if (r.ok) { setMsg(ok); setReply(""); await reload(); } else setErrors(r.errors); };
+  return (
+    <div className="space-y-4">
+      <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
+      <p className="text-sm text-muted-foreground">Replies appear in the customer's account under "Messages". Email delivery is not connected yet. Internal notes are never shown to customers.</p>
+      <ul className="divide-y divide-border text-sm">{data?.map((t) => (
+        <li key={t.id} className="py-3">
+          <button className="flex w-full flex-wrap items-center justify-between gap-2 text-left" aria-expanded={open === t.id} onClick={() => setOpen(open === t.id ? null : t.id)}>
+            <span className="font-semibold">{t.subject}</span><span className="text-muted-foreground">{t.email} · {t.status}</span>
+          </button>
+          {open === t.id && (
+            <div className="mt-3 space-y-3">
+              <ol className="space-y-2">{t.messages.map((m) => <li key={`${m.at}${m.author}`} className={`rounded-md p-3 ${m.internal ? "bg-secondary italic" : "border border-border"}`}><p className="text-xs text-muted-foreground">{m.author === "customer" ? "Customer" : "Staff"}{m.internal && " · internal note"} · {new Date(m.at).toLocaleString()}</p><p className="mt-1 whitespace-pre-wrap">{m.body}</p></li>)}</ol>
+              <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); void run(() => admin.replyTicket(t.id, reply, internal), internal ? "Note saved." : "Reply sent."); }}>
+                <label className="block text-sm font-medium" htmlFor={`r-${t.id}`}>Reply</label>
+                <textarea id={`r-${t.id}`} rows={4} required className={inputCls} value={reply} onChange={(e) => setReply(e.target.value)} />
+                <label className="flex items-center gap-2"><input type="checkbox" checked={internal} onChange={(e) => setInternal(e.target.checked)} /> Internal note (not visible to the customer)</label>
+                <div className="flex flex-wrap items-center gap-3"><button className="btn-primary">{internal ? "Save note" : "Send reply"}</button>
+                  {(["open", "pending", "resolved"] as const).filter((s) => s !== t.status).map((s) => <button type="button" key={s} className="underline" onClick={() => void run(() => admin.setTicketStatus(t.id, s), `Marked ${s}.`)}>Mark {s}</button>)}</div>
+              </form>
+            </div>
+          )}
+        </li>))}{data && !data.length && <li className="py-3 text-muted-foreground">No messages yet.</li>}</ul>
+    </div>
+  );
+}
+
+function AnalyticsView({ admin }: { admin: Admin }) {
+  const [days, setDays] = useState(30);
+  const { data, errors } = useLoad<Analytics>(useCallback(() => admin.analytics(days), [admin, days]));
+  const f = data?.funnel;
+  const pct = (a: number, b: number) => (b > 0 ? `${Math.round((a / b) * 100)}%` : "—");
+  return (
+    <div className="space-y-6">
+      <Errors errors={errors} />
+      <label className="block text-sm font-medium">Period
+        <select className={`${inputCls} mt-1 w-40`} value={days} onChange={(e) => setDays(Number(e.target.value))}><option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option></select>
+      </label>
+      <section aria-labelledby="rev"><h2 id="rev" className="font-display text-lg font-bold">Revenue (verified paid orders only)</h2>
+        <p className="text-xs text-muted-foreground">Currencies are never added together. Net = paid minus refunds.</p>
+        <ul className="mt-2 text-sm">{data && Object.entries(data.revenue).map(([cur, r]) => <li key={cur}>{cur}: net {formatMoney({ amount: r.net, currency: cur as "GHS" | "USD" })} from {r.orders} {r.orders === 1 ? "order" : "orders"} (gross {formatMoney({ amount: r.gross, currency: cur as "GHS" | "USD" })}, refunds {formatMoney({ amount: r.refunds, currency: cur as "GHS" | "USD" })})</li>)}
+          {data && Object.keys(data.revenue).length === 0 && <li className="text-muted-foreground">No paid orders in this period.</li>}</ul></section>
+      <section aria-labelledby="fun"><h2 id="fun" className="font-display text-lg font-bold">Funnel</h2>
+        <p className="text-xs text-muted-foreground">Visitor counts include only people who accepted analytics, so they understate real traffic. Paid orders are exact.</p>
+        {f && <table className="mt-2 w-full max-w-md text-left text-sm"><caption className="sr-only">Funnel</caption><tbody>
+          <tr><th className="py-1 font-medium">Viewed a product</th><td>{f.productViews}</td><td /></tr>
+          <tr><th className="py-1 font-medium">Added to cart</th><td>{f.addToCart}</td><td className="text-muted-foreground">{pct(f.addToCart, f.productViews)}</td></tr>
+          <tr><th className="py-1 font-medium">Started checkout</th><td>{f.checkoutStarts}</td><td className="text-muted-foreground">{pct(f.checkoutStarts, f.addToCart)}</td></tr>
+          <tr><th className="py-1 font-medium">Paid orders</th><td>{f.paidOrders}</td><td /></tr></tbody></table>}</section>
     </div>
   );
 }

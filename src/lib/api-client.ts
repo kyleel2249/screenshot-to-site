@@ -39,6 +39,8 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
   return {
     products: () => get<ApiProduct[]>("/api/products"),
     categories: () => get<CategoryNode[]>("/api/categories"),
+    event: (b: { consent: boolean; kind: string; path?: string; source?: string; campaign?: string }) => post<{ recorded: boolean }>("/api/events", b),
+    myTickets: () => get<Ticket[]>("/api/account/tickets"),
     zones: () => get<{ id: string; name: string; regions: string[]; currency: Currency; baseFee: number; estimate: string }[]>("/api/shipping-zones"),
     support: (b: { email: string; subject: string; body: string }) => post<{ id: string }>("/api/support", b),
     register: (b: { email: string; password: string; firstName: string; lastName: string; acceptTerms: boolean; marketingConsent?: boolean }) => post<{ ok: true }>("/api/register", b),
@@ -76,6 +78,20 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
       renameCategory: (id: string, name: string) => post(`${portal}/api/categories/rename`, { id, name }),
       setCategoryHidden: (id: string, hidden: boolean) => post(`${portal}/api/categories/visibility`, { id, hidden }),
       moveCategory: (id: string, position: number) => post(`${portal}/api/categories/move`, { id, position }),
+      /** CSV (needs recent re-authentication). Returns text, not JSON. */
+      exportOrdersCsv: async (): Promise<ApiResult<string>> => {
+        try {
+          const res = await f(`${base}${portal}/api/export/orders.csv`, { method: "GET", credentials: "same-origin" });
+          const text = await res.text();
+          if (res.ok) return { ok: true, status: res.status, data: text, errors: [] };
+          let msg = "Export failed."; try { const j = JSON.parse(text) as { error?: string }; if (j.error) msg = j.error; } catch { /* keep default */ }
+          return { ok: false, status: res.status, data: null, errors: [msg] };
+        } catch { return { ok: false, status: 0, data: null, errors: ["Network error. Check your connection and try again."] }; }
+      },
+      tickets: () => get<Ticket[]>(`${portal}/api/tickets`),
+      replyTicket: (ticketId: string, body: string, internal = false) => post(`${portal}/api/tickets/reply`, { ticketId, body, internal }),
+      setTicketStatus: (ticketId: string, status: Ticket["status"]) => post(`${portal}/api/tickets/status`, { ticketId, status }),
+      analytics: (days = 30) => get<Analytics>(`${portal}/api/analytics?days=${days}`),
       zones: () => get<AdminZone[]>(`${portal}/api/zones`),
       saveZone: (b: Partial<AdminZone> & { name: string; regions: string[]; currency: Currency; baseFee: number; estimate: string }) => post<AdminZone>(`${portal}/api/zones`, b),
       deleteZone: (id: string) => post(`${portal}/api/zones/delete`, { id }),
@@ -87,6 +103,8 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
   };
 }
 export interface AdminProduct { id: string; slug: string; name: string; archived: boolean; variantId: string | null; sku: string | null; availability: Availability | null; published: boolean; price: Partial<Record<Currency, number>>; salePrice: Partial<Record<Currency, number>> | null; onHand: number; reserved: number; preOrderEnabled: boolean }
+export interface Ticket { id: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: string; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }
+export interface Analytics { days: number; funnel: { productViews: number; addToCart: number; checkoutStarts: number; paidOrders: number }; revenue: Record<string, { gross: number; refunds: number; net: number; orders: number }> }
 export interface AdminZone { id: string; name: string; regions: string[]; currency: Currency; baseFee: number; perKgFee: number; freeOver?: number; estimate: string; quotationOnly?: boolean }
 export interface AdminDiscount { code: string; kind: "percent" | "fixed" | "free_shipping"; value: number; currency?: Currency; startsAt?: string; endsAt?: string; minSubtotal?: number; maxRedemptions?: number; perCustomerLimit?: number; firstPurchaseOnly?: boolean; redeemed: number; active: boolean }
 export interface AdminOrder extends ApiOrder { guestEmail: string | null; address: { recipient: string; region: string; city: string; street: string } }

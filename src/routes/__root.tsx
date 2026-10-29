@@ -13,6 +13,7 @@ import { useEffect, type ReactNode } from "react";
 import { Toaster } from "sonner";
 import { CartProvider } from "@/lib/cart";
 import { CatalogProvider } from "@/lib/catalog-store";
+import { ConsentBanner } from "@/components/ConsentBanner";
 import { CurrencyProvider } from "@/lib/currency";
 import { SiteHeader, SiteFooter } from "@/components/SiteChrome";
 import appCss from "../styles.css?url";
@@ -127,6 +128,7 @@ function RootComponent() {
           <main id="main"><Outlet /></main>
           <SiteFooter />
           <Toaster position="bottom-right" />
+          <ConsentBanner />
         </CartProvider>
         </CatalogProvider>
       </CurrencyProvider>
