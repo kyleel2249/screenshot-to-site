@@ -11,6 +11,8 @@ import { buildRobots, buildSitemap } from "../lib/seo/sitemap";
 import { SEED_CATEGORIES } from "../lib/domain/categories";
 import { handle, publicProducts, type Deps, type Env } from "./api";
 import { injectProductSeo } from "./seo-inject";
+import { timingSafeEqual } from "../lib/security/crypto";
+import { runMaintenance } from "./maintenance";
 import { transact, type Persistence } from "./persistence/transact";
 
 const BASE_HEADERS: Record<string, string> = {
@@ -53,6 +55,13 @@ export async function route(req: Request, env: Env, persistence: Persistence, ss
     const raw = (await req.text().catch(() => "")).slice(0, 4000);
     if (raw) console.warn("csp-violation", raw.replace(/[\r\n\t]+/g, " ").slice(0, 600));
     return withHeaders(new Response(null, { status: 204 }), NO_STORE);
+  }
+  if (path === "/api/maintenance" && req.method === "POST") {
+    // Fallback for platforms where the Worker's `scheduled` hook isn't wired: any scheduler (Cron Worker, GitHub Actions, cron-job.org) can POST here
+    // with the secret MAINTENANCE_KEY. Disabled (404) until that secret is set, constant-time comparison, no body, no output beyond counts.
+    const key = env.MAINTENANCE_KEY ?? "", given = req.headers.get("x-maintenance-key") ?? "";
+    if (key.length < 24 || !timingSafeEqual(given, key)) return withHeaders(new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers: { "content-type": "application/json" } }), NO_STORE);
+    return withHeaders(new Response(JSON.stringify(await runMaintenance(persistence)), { headers: { "content-type": "application/json" } }), NO_STORE);
   }
   if (path === "/api" || path.startsWith("/api/") || (isPortal && path.startsWith(`${portal}/api`))) return withHeaders(await handle(req, env, persistence, deps));
 

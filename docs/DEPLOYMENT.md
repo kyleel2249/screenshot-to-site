@@ -1,11 +1,11 @@
 # Deployment guide (Cloudflare)
 
-> Status: the API, persistence and security code are implemented and tested offline. Items marked **TODO-LOCAL** need a machine with npm access.
+> Status: the API, persistence and security code are implemented and covered by offline tests. The React pages were written and type-checked against stand-in library types, but have **not been built** (the build environment could not reach the npm registry). Your first `npm i && npm run build && npm test` is part of acceptance — fix anything it reports before going live.
 
 ## 1. Prerequisites
 - Cloudflare account, `wrangler` CLI, Node 20+.
-- A payment provider chosen **after** confirming your Ghana merchant eligibility (card / Mobile Money). Not yet integrated.
-- A transactional email provider (the API calls an injectable `deps.mail`; no provider is wired yet).
+- A payment provider chosen **after** confirming your Ghana merchant eligibility. The Paystack adapter (card + Mobile Money) is built; it has not run against the live service.
+- A transactional email provider: the Resend adapter is built; you need an API key and a verified sending domain.
 
 ## 2. Database (D1)
 ```
@@ -39,17 +39,20 @@ wrangler secret put BANK_TRANSFER_DETAILS
 `POST https://<site>/<ADMIN_PORTAL_PATH>/api/enrol` with `{reference,email,password}`. It works once, only while no staff account exists, then
 closes permanently. Verify the owner email via the emailed link, then log in. The reference is never stored or logged.
 
-## 5. Wiring (TODO-LOCAL)
-Expose `createFetchHandler()` from `src/server/worker-entry.ts` for `/api/*` and the portal path (a TanStack Start server route or a
-Pages Function). Then `npm i && npm run build && npm test`, deploy with `wrangler pages deploy`.
-Apply `securityHeaders()` (src/lib/security/headers.ts) to HTML responses with a per-response nonce; serve `buildSitemap()`/`buildRobots()` at
-`/sitemap.xml` and `/robots.txt`.
+## 5. Build and deploy
+`src/server.ts` is already wired: with the `DB`, `SESSION_SECRET` and `SITE_ORIGIN` bindings present it routes everything through `src/server/edge.ts` (API, generated sitemap/robots, per-product SEO tags, security headers, CSP). Then:
+```
+npm i && npm run build && npm test     # regenerates src/routeTree.gen.ts; fix any type errors it reports
+```
+Use `wrangler.example.jsonc` as the starting point for your Cloudflare config (D1 binding `DB`, `SITE_ORIGIN`, cron trigger) and adapt it to the Worker output your build produces. If your platform does not run the Worker's `scheduled` handler, schedule a `POST https://<site>/api/maintenance` with header `x-maintenance-key: <MAINTENANCE_KEY>` every 5 minutes instead (any scheduler works; the endpoint stays disabled until you set a `MAINTENANCE_KEY` of 24+ characters).
 
 ## 6. Before taking real money
 - Provider adapter + webhook mapping to `{eventId, orderRef, amount, currency, status}`; test with sandbox credentials; confirm settlement currency.
 - Maintenance Cron Trigger: add `"triggers": { "crons": ["*/5 * * * *"] }` to your wrangler config. The Worker's `scheduled` handler releases expired stock holds (bank-transfer holds included) and clears expired sessions and tokens.
 - Backups: `wrangler d1 export` on a schedule to private R2; **perform and record a restore test** — backups are not real until restored.
-- Legal review of the draft policy pages for Ghana; replace demo data and placeholder contact details.
+- Legal review of the policy pages for Ghana, then tick "reviewed" in the portal Content tab (until then they show a DRAFT banner).
+- In the portal: fill in Business details, import your real products (Products → Import), set shipping zones and your exchange rate, and add your bank details secret if you want bank transfer.
+- Place a test order of each kind (card, Mobile Money, bank transfer, pre-order) and a refund before announcing the shop.
 
 
 ## How requests are routed

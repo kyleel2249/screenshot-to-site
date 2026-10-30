@@ -1,0 +1,14 @@
+{
+  // Starting point only: copy to wrangler.jsonc and adapt to the Worker output of your build. Secrets are NOT stored here —
+  // set them with `wrangler secret put <NAME>` (see docs/DEPLOYMENT.md section 3).
+  "name": "dera-darko-trade",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "SITE_ORIGIN": "https://your-domain.example"
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "dera-darko-trade", "database_id": "<paste the id printed by `wrangler d1 create`>" }
+  ],
+  "triggers": { "crons": ["*/5 * * * *"] }
+}

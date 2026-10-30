@@ -133,3 +133,16 @@ describe("content security policy at the edge", () => {
     expect(await r.text()).toContain(`<script nonce="${nonce}" type="application/ld+json"`);
   });
 });
+
+describe("maintenance endpoint", () => {
+  test("disabled without a long key; wrong/missing key looks like 404; right key runs the job and returns only counts", async () => {
+    const { p, env } = await setup(); const post = (k?: string) => new Request(`${ORIGIN}/api/maintenance`, { method: "POST", headers: k ? { "x-maintenance-key": k } : {} });
+    const ssr = async () => new Response("x");
+    expect((await route(post("anything-at-all-anything-at-all"), env, p, ssr)).status).toBe(404); // not configured
+    const KEY = "k".repeat(32), on = { ...env, MAINTENANCE_KEY: KEY };
+    expect((await route(post(), on, p, ssr)).status).toBe(404); expect((await route(post("wrong".repeat(8)), on, p, ssr)).status).toBe(404);
+    expect((await route(new Request(`${ORIGIN}/api/maintenance`, { headers: { "x-maintenance-key": KEY } }), on, p, ssr)).status).not.toBe(200); // GET isn't allowed
+    const ok = await route(post(KEY), on, p, ssr); expect(ok.status).toBe(200); expect(await ok.json()).toEqual({ released: 0, sessions: 0, tokens: 0 }); expect(ok.headers.get("cache-control")).toBe("private, no-store");
+    expect((await route(post("short"), { ...env, MAINTENANCE_KEY: "short" }, p, ssr)).status).toBe(404); // weak keys are refused outright
+  });
+});
