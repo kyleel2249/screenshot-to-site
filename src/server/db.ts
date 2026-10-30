@@ -27,6 +27,13 @@ export interface OrderRow {
 export interface SessionRow { id: string; userId: string; expiresAt: number; revoked: boolean; authAt: number }
 export interface TicketRow { id: string; userId?: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: "low" | "normal" | "high"; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }
 export interface EventRow { session: string; kind: string; path?: string; source?: string; campaign?: string; orderRef?: string; at: number }
+export interface QuoteRow {
+  id: string; ref: string; secretHash: string; status: "new" | "quoted" | "accepted" | "declined" | "expired";
+  business: string; contactName: string; email: string; phone?: string; region: string; notes: string;
+  items: { description: string; qty: number }[];
+  quote?: { currency: "GHS" | "USD"; total: number; validUntil: number; message: string; quotedAt: number };
+  createdAt: number;
+}
 export interface PrivacyRequest { id: string; userId: string; kind: "export" | "deletion" | "correction"; status: "open" | "done"; at: number }
 export interface AuditRow { id: number; actor?: string; event: string; detail: Record<string, string | number | boolean>; at: number }
 
@@ -47,6 +54,7 @@ export class MemoryDb {
   events: EventRow[] = [];
   wishlist = new Map<string, Set<string>>(); // userId -> productIds
   consents: { userId: string; kind: string; granted: boolean; policyVersion?: string; at: number }[] = [];
+  quotes = new Map<string, QuoteRow>();
   privacy = new Map<string, PrivacyRequest>();
   tokens = new Map<string, { userId: string; kind: "verify" | "reset" | "invite"; expiresAt: number }>();
   settings: Record<string, string> = { displayMode: "GHS" };

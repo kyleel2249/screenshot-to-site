@@ -1,7 +1,7 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone, Analytics, StaffMember, Ticket } from "@/lib/api-client";
+import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone, AdminQuote, Analytics, StaffMember, Ticket } from "@/lib/api-client";
 import { childrenOf, topLevel, type CategoryNode } from "@/lib/domain/categories";
 import { formatMoney } from "@/lib/domain/money";
 import { GHANA_REGIONS } from "@/lib/domain/regions";
@@ -20,7 +20,7 @@ export const Route = createFileRoute("/$portal")({
   component: Dashboard,
 });
 
-type Tab = "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
+type Tab = "quotes" | "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
 const AVAIL = Object.keys(AVAILABILITY_LABEL) as Availability[];
 
 function Dashboard() {
@@ -44,9 +44,9 @@ function Dashboard() {
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => setState("login"))}>Sign out</button>
       </header>
       <nav className="mt-6 flex gap-2" aria-label="Sections" role="tablist">
-        {(["products", "orders", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
+        {(["products", "orders", "quotes", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
       </nav>
-      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
+      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "quotes" ? <Quotes admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
     </div>
   );
 }
@@ -375,6 +375,37 @@ function StaffTab({ admin }: { admin: Admin }) {
           {Object.entries(ROLE_HELP).map(([r, h]) => <label key={r} className="flex items-start gap-2 py-0.5 text-sm"><input type="checkbox" className="mt-1" checked={roles.includes(r)} onChange={() => tog(r, roles, setRoles)} /><span><span className="font-medium capitalize">{r}</span> — {h}</span></label>)}</fieldset>
         <button className="btn-primary" disabled={!roles.length}>Send invitation</button>
       </form>
+    </div>
+  );
+}
+
+function Quotes({ admin }: { admin: Admin }) {
+  const { data, errors, reload, setErrors } = useLoad<AdminQuote[]>(useCallback(() => admin.quotes(), [admin]));
+  const [open, setOpen] = useState<string | null>(null); const [f, setF] = useState({ currency: "GHS" as "GHS" | "USD", total: "", validDays: "14", message: "" }); const [msg, setMsg] = useState("");
+  async function send(id: string, e: React.FormEvent) {
+    e.preventDefault(); setMsg(""); setErrors([]);
+    const r = await admin.sendQuote(id, { currency: f.currency, total: Math.round(Number(f.total) * 100), validDays: Number(f.validDays), message: f.message });
+    if (r.ok) { setMsg("Quote sent to the requester's status page."); setF({ ...f, total: "", message: "" }); await reload(); } else setErrors(r.errors);
+  }
+  return (
+    <div className="space-y-4">
+      <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
+      <p className="text-sm text-muted-foreground">Requesters see your quote on their status page. Nothing is priced automatically. Email notification is not connected yet, so contact them by email or phone with their reference.</p>
+      <ul className="divide-y divide-border text-sm">{data?.map((q) => (
+        <li key={q.id} className="py-3">
+          <button className="flex w-full flex-wrap justify-between gap-2 text-left" aria-expanded={open === q.id} onClick={() => setOpen(open === q.id ? null : q.id)}><span className="font-semibold">{q.ref} · {q.business || q.contactName}</span><span className="text-muted-foreground">{q.status}</span></button>
+          {open === q.id && (<div className="mt-3 space-y-3">
+            <p>{q.contactName} · {q.email}{q.phone && ` · ${q.phone}`} · {q.region}</p>
+            <ul className="list-disc pl-5">{q.items.map((i, n) => <li key={n}>{i.qty} × {i.description}</li>)}</ul>{q.notes && <p className="whitespace-pre-wrap text-muted-foreground">{q.notes}</p>}
+            {q.quote && <p>Current quote: {formatMoney({ amount: q.quote.total, currency: q.quote.currency })}, valid until {new Date(q.quote.validUntil).toLocaleDateString()}</p>}
+            {q.status !== "accepted" && <form className="grid gap-3 sm:grid-cols-4" onSubmit={(e) => void send(q.id, e)}>
+              <Field label="Total" type="number" step="0.01" min="0.01" required value={f.total} onChange={(e) => setF({ ...f, total: e.target.value })} />
+              <div><label htmlFor={`qc-${q.id}`} className="mb-1 block text-sm font-medium">Currency</label><select id={`qc-${q.id}`} className={inputCls} value={f.currency} onChange={(e) => setF({ ...f, currency: e.target.value as "GHS" | "USD" })}><option>GHS</option><option>USD</option></select></div>
+              <Field label="Valid for (days)" type="number" min="1" max="90" required value={f.validDays} onChange={(e) => setF({ ...f, validDays: e.target.value })} />
+              <div className="sm:col-span-4"><label htmlFor={`qm-${q.id}`} className="mb-1 block text-sm font-medium">Message to requester</label><textarea id={`qm-${q.id}`} rows={3} className={inputCls} value={f.message} onChange={(e) => setF({ ...f, message: e.target.value })} /></div>
+              <button className="btn-primary sm:col-span-4">{q.quote ? "Send revised quote" : "Send quote"}</button></form>}
+          </div>)}
+        </li>))}{data && !data.length && <li className="py-3 text-muted-foreground">No quote requests yet.</li>}</ul>
     </div>
   );
 }

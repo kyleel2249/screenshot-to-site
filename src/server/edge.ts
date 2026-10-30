@@ -20,7 +20,7 @@ const BASE_HEADERS: Record<string, string> = {
   "X-Frame-Options": "DENY",
   "Cross-Origin-Opener-Policy": "same-origin",
 };
-const PRIVATE_PAGES = /^\/(cart|checkout|account|login|register|forgot-password|reset-password|verify-email|accept-invite|track)(\/|$)/;
+const PRIVATE_PAGES = /^\/(cart|checkout|account|login|register|forgot-password|reset-password|verify-email|accept-invite|quote-status|track)(\/|$)/;
 
 export function withHeaders(res: Response, extra: Record<string, string> = {}): Response {
   const out = new Response(res.body, res);

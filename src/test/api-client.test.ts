@@ -267,3 +267,35 @@ describe("staff invitations", () => {
     expect((await shopper().admin(PORTAL).staff()).status).toBe(404);
   });
 });
+
+describe("wholesale quotes", () => {
+  test("request → staff quote → requester accepts; secrets protect it; no automatic pricing; expiry; permissions", async () => {
+    const { admin, shopper, p, staff } = await ownerSession();
+    const buyer = shopper();
+    const bad = await buyer.requestQuote({ contactName: "", email: "x", region: "", items: [{ description: "", qty: 0 }] }); expect(bad.status).toBe(422); expect(bad.errors.length).toBeGreaterThan(3);
+    const r = await buyer.requestQuote({ business: "Kofi Traders", contactName: "Kofi", email: "k@x.com", region: "Ashanti", items: [{ description: "Cookware set", qty: 50 }] });
+    expect(r.status).toBe(201); const { ref, secret } = r.data!;
+    expect((await buyer.quoteStatus(ref, secret)).data).toMatchObject({ status: "new" });
+    expect((await buyer.quoteStatus(ref, secret)).data!.quote).toBeUndefined();
+    expect((await buyer.quoteStatus(ref, "wrong")).status).toBe(404); expect((await buyer.quoteStatus("Q-NOPE", secret)).status).toBe(404);
+    expect((await buyer.respondToQuote(ref, secret, true)).status).toBe(422); // nothing to accept yet
+    const id = (await admin.quotes()).data![0]!.id;
+    expect((await admin.sendQuote(id, { currency: "GHS", total: 0, validDays: 7 })).status).toBe(422);
+    expect((await admin.sendQuote(id, { currency: "GHS", total: 4500000, validDays: 7, message: "Delivery included" })).ok).toBe(true);
+    expect((await buyer.quoteStatus(ref, secret)).data).toMatchObject({ status: "quoted", quote: { total: 4500000, currency: "GHS" } });
+    expect((await buyer.respondToQuote(ref, secret, true)).data!.status).toBe("accepted");
+    expect((await admin.sendQuote(id, { currency: "GHS", total: 1, validDays: 1 })).status).toBe(422); // accepted quotes are frozen
+    // expiry
+    const r2 = await buyer.requestQuote({ contactName: "B", email: "b@x.com", region: "Volta", items: [{ description: "Bags", qty: 10 }] });
+    const id2 = (await admin.quotes()).data!.find((q) => q.ref === r2.data!.ref)!.id;
+    await admin.sendQuote(id2, { currency: "USD", total: 90000, validDays: 1 });
+    await transact(p, (db) => { db.quotes.get(id2)!.quote!.validUntil = 1; });
+    expect((await buyer.quoteStatus(r2.data!.ref, r2.data!.secret)).data!.status).toBe("expired");
+    expect((await buyer.respondToQuote(r2.data!.ref, r2.data!.secret, true)).status).toBe(422);
+    // support role can't price quotes; anonymous can't list
+    expect((await shopper().admin(PORTAL).quotes()).status).toBe(404);
+    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["analyst"]; });
+    await staff.logout(); await staff.login("owner@shop.test", PW);
+    expect((await admin.quotes()).ok).toBe(true); expect((await admin.sendQuote(id2, { currency: "GHS", total: 5, validDays: 1 })).status).toBe(403);
+  });
+});

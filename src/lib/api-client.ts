@@ -44,6 +44,9 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     zones: () => get<{ id: string; name: string; regions: string[]; currency: Currency; baseFee: number; estimate: string }[]>("/api/shipping-zones"),
     support: (b: { email: string; subject: string; body: string }) => post<{ id: string }>("/api/support", b),
     register: (b: { email: string; password: string; firstName: string; lastName: string; acceptTerms: boolean; marketingConsent?: boolean }) => post<{ ok: true }>("/api/register", b),
+    requestQuote: (b: { business?: string; contactName: string; email: string; phone?: string; region: string; notes?: string; items: { description: string; qty: number }[] }) => post<{ ref: string; secret: string }>("/api/quotes", b),
+    quoteStatus: (ref: string, secret: string) => get<QuoteView>(`/api/quotes/status?ref=${encodeURIComponent(ref)}&secret=${encodeURIComponent(secret)}`),
+    respondToQuote: (ref: string, secret: string, accept: boolean) => post<QuoteView>("/api/quotes/respond", { ref, secret, accept }),
     acceptInvite: (token: string, password: string) => post<{ ok: true }>("/api/staff/accept-invite", { token, password }),
     verifyEmail: (token: string) => post<{ ok: true }>("/api/verify-email", { token }),
     login: (email: string, password: string) => post<{ ok: true }>("/api/login", { email, password }),
@@ -89,6 +92,8 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
           return { ok: false, status: res.status, data: null, errors: [msg] };
         } catch { return { ok: false, status: 0, data: null, errors: ["Network error. Check your connection and try again."] }; }
       },
+      quotes: () => get<AdminQuote[]>(`${portal}/api/quotes`),
+      sendQuote: (id: string, b: { currency: Currency; total: number; validDays: number; message?: string }) => post(`${portal}/api/quotes/send`, { id, ...b }),
       staff: () => get<StaffMember[]>(`${portal}/api/staff`),
       inviteStaff: (email: string, roles: string[]) => post(`${portal}/api/staff/invite`, { email, roles }),
       setStaffRoles: (userId: string, roles: string[]) => post(`${portal}/api/staff/roles`, { userId, roles }),
@@ -108,6 +113,8 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
   };
 }
 export interface AdminProduct { id: string; slug: string; name: string; archived: boolean; variantId: string | null; sku: string | null; availability: Availability | null; published: boolean; price: Partial<Record<Currency, number>>; salePrice: Partial<Record<Currency, number>> | null; onHand: number; reserved: number; preOrderEnabled: boolean }
+export interface QuoteView { ref: string; status: "new" | "quoted" | "accepted" | "declined" | "expired"; items: { description: string; qty: number }[]; createdAt: number; quote?: { currency: Currency; total: number; validUntil: number; message: string } }
+export interface AdminQuote { id: string; ref: string; business: string; contactName: string; email: string; phone: string | null; region: string; notes: string; items: { description: string; qty: number }[]; status: QuoteView["status"]; quote: (QuoteView["quote"] & { quotedAt: number }) | null; createdAt: number }
 export interface StaffMember { id: string; email: string; roles: string[]; state: "active" | "invited" | "suspended"; createdAt: number }
 export interface Ticket { id: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: string; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }
 export interface Analytics { days: number; funnel: { productViews: number; addToCart: number; checkoutStarts: number; paidOrders: number }; revenue: Record<string, { gross: number; refunds: number; net: number; orders: number }> }

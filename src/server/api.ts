@@ -19,6 +19,7 @@ import { ConflictError, transact, type Persistence } from "./persistence/transac
 import { addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
 import { adminStoreFor, authenticate, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
 import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
+import { listQuotes, lookupQuote, requestQuote, respondToQuote, sendQuote } from "./services/quotes";
 import { acceptInvite, inviteStaff, listStaff, setStaffActive, setStaffRoles } from "./services/staff";
 import { listTickets, myTickets, openTicket, setTicketStatus, staffReply } from "./services/support";
 import { adjustStock, categoryAdmin, createProduct, setAvailability, setPrices, setPublishedState, ValidationError } from "./services/catalog-admin";
@@ -186,6 +187,8 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         }
         if (sub === "/staff/roles" && req.method === "POST") { await transact(p, (db) => setStaffRoles(db, actor, str(body, "userId"), body["roles"])); return json({ ok: true }); }
         if (sub === "/staff/active" && req.method === "POST") { await transact(p, (db) => setStaffActive(db, actor, str(body, "userId"), bool(body, "active"))); return json({ ok: true }); }
+        if (sub === "/quotes" && req.method === "GET") return json(await transact(p, (db) => listQuotes(db, actor)));
+        if (sub === "/quotes/send" && req.method === "POST") { await transact(p, (db) => sendQuote(db, actor, str(body, "id"), { currency: body["currency"], total: body["total"], validDays: body["validDays"], message: body["message"] })); return json({ ok: true }); }
         if (sub === "/tickets" && req.method === "GET") return json(await transact(p, (db) => listTickets(db, actor)));
         if (sub === "/tickets/reply" && req.method === "POST") { await transact(p, (db) => staffReply(db, actor, str(body, "ticketId"), str(body, "body"), bool(body, "internal"))); return json({ ok: true }); }
         if (sub === "/tickets/status" && req.method === "POST") { await transact(p, (db) => setTicketStatus(db, actor, str(body, "ticketId"), str(body, "status") as never)); return json({ ok: true }); }
@@ -245,6 +248,21 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       return r.ok ? json({ ok: true }) : json({ errors: r.errors }, 400);
     }
 
+    if (path === "/api/quotes" && req.method === "POST") {
+      if (!limiters.auth.check(`quote:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const r = await transact(p, (db) => requestQuote(db, body));
+      return json(r, 201); // the secret is shown once to the requester
+    }
+    if (path === "/api/quotes/status" && req.method === "GET") {
+      if (!limiters.auth.check(`quote:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const q = await transact(p, (db) => lookupQuote(db, url.searchParams.get("ref") ?? "", url.searchParams.get("secret") ?? ""));
+      return q ? json(q) : notFound();
+    }
+    if (path === "/api/quotes/respond" && req.method === "POST") {
+      if (!limiters.auth.check(`quote:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const q = await transact(p, (db) => respondToQuote(db, str(body, "ref"), str(body, "secret"), bool(body, "accept")));
+      return q ? json(q) : notFound();
+    }
     if (path === "/api/staff/accept-invite" && req.method === "POST") {
       if (!limiters.auth.check(`inv:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
       const r = await transact(p, (db) => acceptInvite(db, str(body, "token"), str(body, "password"), Date.now(), iterations));
