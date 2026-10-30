@@ -36,20 +36,11 @@ function ProductPage() {
   const price = displayPrice(p, mode);
   const purchasable = isPurchasable(p);
   const crumbs = breadcrumb(categories, p.categoryId);
-  const ghs = (p.salePrice ?? p.price).GHS;
-  // Structured data mirrors the visible price/availability exactly.
-  const ld = {
-    "@context": "https://schema.org", "@type": "Product", name: p.name, description: p.shortDescription, image: p.image,
-    ...(p.rating && p.rating.count > 0 ? { aggregateRating: { "@type": "AggregateRating", ratingValue: p.rating.average, reviewCount: p.rating.count } } : {}), // only real, published reviews
-    ...(ghs !== undefined ? { offers: { "@type": "Offer", priceCurrency: "GHS", price: (ghs / 100).toFixed(2), availability: p.availability === "available" ? "https://schema.org/InStock" : p.availability === "pre_order" ? "https://schema.org/PreOrder" : "https://schema.org/OutOfStock" } } : {}),
-  };
-
+  // Title, description, canonical, Open Graph and Product JSON-LD are written into the HTML head by the edge (src/server/seo-inject.ts)
+  // from the same database record, so crawlers and link previews see them without running this page.
   return (
     <>
     <div className="container-x grid gap-10 py-12 md:grid-cols-2">
-      <title>{`${p.name} — Dera Darko Trade`}</title>
-      <meta name="description" content={p.shortDescription} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(ld).replace(/</g, "\\u003c") }} />
       <img src={p.image} alt={p.imageAlt} width={816} height={816} className="w-full rounded-2xl border border-border object-cover" />
       <div>
         <nav aria-label="Breadcrumb" className="text-sm text-muted-foreground">

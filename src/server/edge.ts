@@ -9,7 +9,8 @@ import { resolvePortalPath } from "../lib/security/enrolment";
 import { NO_STORE } from "../lib/security/headers";
 import { buildRobots, buildSitemap } from "../lib/seo/sitemap";
 import { SEED_CATEGORIES } from "../lib/domain/categories";
-import { handle, type Deps, type Env } from "./api";
+import { handle, publicProducts, type Deps, type Env } from "./api";
+import { injectProductSeo } from "./seo-inject";
 import { transact, type Persistence } from "./persistence/transact";
 
 const BASE_HEADERS: Record<string, string> = {
@@ -43,6 +44,16 @@ export async function route(req: Request, env: Env, persistence: Persistence, ss
   }
 
   const res = await ssr(req);
+  const pm = req.method === "GET" ? /^\/product\/([^/]+)\/?$/.exec(path) : null;
+  if (pm && res.status === 200 && (res.headers.get("content-type") ?? "").includes("text/html")) {
+    let slug = ""; try { slug = decodeURIComponent(pm[1]!); } catch { /* malformed → not found */ }
+    const product = slug ? await transact(persistence, (db) => publicProducts(db).find((x) => x.slug === slug)) : undefined;
+    // An unknown, unpublished or hidden product is a real 404 for crawlers (the page itself shows the friendly not-found message).
+    if (!product) return withHeaders(new Response(res.body, { status: 404, headers: res.headers }), { "X-Robots-Tag": "noindex" });
+    const html = injectProductSeo(await res.text(), product, env.SITE_ORIGIN);
+    const h = new Headers(res.headers); h.delete("content-length"); h.delete("content-encoding");
+    return withHeaders(new Response(html, { status: 200, headers: h }), { "Cache-Control": "public, max-age=0, s-maxage=300, stale-while-revalidate=600" });
+  }
   // Portal pages and personal/transactional pages must never be cached or indexed.
   if (isPortal) return withHeaders(res, { ...NO_STORE, "X-Robots-Tag": "noindex, nofollow, noarchive" });
   if (PRIVATE_PAGES.test(path)) return withHeaders(res, { ...NO_STORE, "X-Robots-Tag": "noindex" });

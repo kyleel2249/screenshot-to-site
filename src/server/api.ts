@@ -73,7 +73,7 @@ const orderView = (o: { id: string; ref: string; status: string; currency: strin
   ({ id: o.id, ref: o.ref, status: o.status, currency: o.currency, subtotal: o.subtotal, discount: o.discount, shipping: o.shipping, total: o.total, hasPreorder: o.hasPreorder, createdAt: o.createdAt, items: o.items.map((i) => ({ name: i.name, qty: i.qty, unit: i.unit, line: i.line, mode: i.mode })), history: o.history.map((h) => ({ to: h.to, at: h.at })) });
 
 /** Public catalogue straight from the database: never exposes costs, exact stock (unless limited-stock display is on), or unpublished items. */
-function publicProducts(db: MemoryDb, now = new Date()) {
+export function publicProducts(db: MemoryDb, now = new Date()) {
   const out = [];
   for (const p of db.products.values()) {
     if (p.archived) continue;
