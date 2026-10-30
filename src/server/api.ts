@@ -19,6 +19,7 @@ import { ConflictError, transact, type Persistence } from "./persistence/transac
 import { addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
 import { adminStoreFor, authenticate, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
 import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
+import { acceptInvite, inviteStaff, listStaff, setStaffActive, setStaffRoles } from "./services/staff";
 import { listTickets, myTickets, openTicket, setTicketStatus, staffReply } from "./services/support";
 import { adjustStock, categoryAdmin, createProduct, setAvailability, setPrices, setPublishedState, ValidationError } from "./services/catalog-admin";
 import { completeRefund, getOrderForCustomer, handleVerifiedPayment, listOrdersForCustomer, placeOrder, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "./services/orders";
@@ -31,7 +32,7 @@ export interface Env {
 }
 export interface Deps {
   /** Outbound email. Tokens are only ever delivered here, never returned in an HTTP response. */
-  mail?: (to: string, template: "verify_email" | "password_reset" | "owner_verify", data: { token: string }) => Promise<void>;
+  mail?: (to: string, template: "verify_email" | "password_reset" | "owner_verify" | "staff_invite", data: { token: string }) => Promise<void>;
 }
 type Body = Record<string, unknown>;
 
@@ -177,6 +178,14 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         if (sub === "/categories/rename" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).rename(str(body, "id"), str(body, "name"))); return json({ ok: true }); }
         if (sub === "/categories/visibility" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).hide(str(body, "id"), bool(body, "hidden"))); return json({ ok: true }); }
         if (sub === "/categories/move" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).move(str(body, "id"), num(body, "position"))); return json({ ok: true }); }
+        if (sub === "/staff" && req.method === "GET") return json(await transact(p, (db) => listStaff(db, actor)));
+        if (sub === "/staff/invite" && req.method === "POST") {
+          const r = await transact(p, (db) => inviteStaff(db, actor, { email: str(body, "email"), roles: body["roles"] }));
+          await deps.mail?.(r.email, "staff_invite", { token: r.token }); // token only ever goes to the invitee's inbox
+          return json({ ok: true }, 201);
+        }
+        if (sub === "/staff/roles" && req.method === "POST") { await transact(p, (db) => setStaffRoles(db, actor, str(body, "userId"), body["roles"])); return json({ ok: true }); }
+        if (sub === "/staff/active" && req.method === "POST") { await transact(p, (db) => setStaffActive(db, actor, str(body, "userId"), bool(body, "active"))); return json({ ok: true }); }
         if (sub === "/tickets" && req.method === "GET") return json(await transact(p, (db) => listTickets(db, actor)));
         if (sub === "/tickets/reply" && req.method === "POST") { await transact(p, (db) => staffReply(db, actor, str(body, "ticketId"), str(body, "body"), bool(body, "internal"))); return json({ ok: true }); }
         if (sub === "/tickets/status" && req.method === "POST") { await transact(p, (db) => setTicketStatus(db, actor, str(body, "ticketId"), str(body, "status") as never)); return json({ ok: true }); }
@@ -233,6 +242,12 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
     }
     if (path === "/api/password/reset" && req.method === "POST") {
       const r = await transact(p, (db) => resetPassword(db, str(body, "token"), str(body, "password"), Date.now(), iterations));
+      return r.ok ? json({ ok: true }) : json({ errors: r.errors }, 400);
+    }
+
+    if (path === "/api/staff/accept-invite" && req.method === "POST") {
+      if (!limiters.auth.check(`inv:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const r = await transact(p, (db) => acceptInvite(db, str(body, "token"), str(body, "password"), Date.now(), iterations));
       return r.ok ? json({ ok: true }) : json({ errors: r.errors }, 400);
     }
 

@@ -228,3 +228,42 @@ describe("orders CSV export", () => {
     expect(ok.data).not.toContain("g@x.com"); expect(ok.data).not.toContain("cmd"); // no customer PII in the export
   });
 });
+
+describe("staff invitations", () => {
+  test("invite → accept → sign in with limited role; owner is protected; suspension and role change cut access", async () => {
+    const { admin, shopper, tokens, p } = await ownerSession();
+    expect((await admin.inviteStaff("bad", ["support"])).status).toBe(422);
+    expect((await admin.inviteStaff("a@shop.test", ["owner"])).status).toBe(422); // owner can't be granted
+    expect((await admin.inviteStaff("a@shop.test", ["support"])).ok).toBe(true);
+    const first = tokens.at(-1)!;
+    expect((await admin.staff()).data!.find((s) => s.email === "a@shop.test")!.state).toBe("invited");
+    const sam = shopper();
+    expect((await sam.login("a@shop.test", PW)).ok).toBe(false); // can't sign in before accepting
+    expect((await admin.inviteStaff("a@shop.test", ["support", "analyst"])).ok).toBe(true); // re-invite kills old link
+    expect((await sam.acceptInvite(first, PW)).ok).toBe(false);
+    expect((await sam.acceptInvite(tokens.at(-1)!, "weak")).ok).toBe(false);
+    // a weak password is rejected before the link is consumed, so a typo doesn't burn the invitation
+    expect((await admin.inviteStaff("a@shop.test", ["support"])).ok).toBe(true);
+    expect((await sam.acceptInvite(tokens.at(-1)!, PW)).ok).toBe(true);
+    expect((await sam.login("a@shop.test", PW)).ok).toBe(true);
+    const samAdmin = sam.admin(PORTAL);
+    expect((await samAdmin.tickets()).ok).toBe(true); expect((await samAdmin.zones()).status).toBe(403); expect((await samAdmin.staff()).status).toBe(403);
+    const id = (await admin.staff()).data!.find((s) => s.email === "a@shop.test")!.id;
+    await admin.setStaffRoles(id, ["fulfilment"]);
+    expect((await samAdmin.orders()).status).toBe(404); // sessions revoked on role change (portal answers 404 to anyone not signed in)
+    await sam.login("a@shop.test", PW); expect((await samAdmin.orders()).ok).toBe(true);
+    await admin.setStaffActive(id, false); expect((await samAdmin.orders()).status).toBe(404);
+    expect((await sam.login("a@shop.test", PW)).ok).toBe(false);
+    await admin.setStaffActive(id, true); expect((await sam.login("a@shop.test", PW)).ok).toBe(true);
+    const owner = (await admin.staff()).data!.find((s) => s.roles.includes("owner"))!;
+    expect((await admin.setStaffActive(owner.id, false)).status).toBe(422); expect((await admin.setStaffRoles(owner.id, ["support"])).status).toBe(422);
+    expect(await transact(p, (db) => [...db.audit].map((a) => a.event).filter((e) => e.startsWith("staff.")))).toContain("staff.invite_accepted");
+  });
+  test("invitations expire and customers can't use staff management", async () => {
+    const { admin, shopper, tokens, p } = await ownerSession();
+    await admin.inviteStaff("b@shop.test", ["analyst"]);
+    await transact(p, (db) => { for (const t of db.tokens.values()) if (t.kind === "invite") t.expiresAt = 1; });
+    expect((await shopper().acceptInvite(tokens.at(-1)!, PW)).ok).toBe(false);
+    expect((await shopper().admin(PORTAL).staff()).status).toBe(404);
+  });
+});

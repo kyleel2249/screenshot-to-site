@@ -48,7 +48,7 @@ export class MemoryDb {
   wishlist = new Map<string, Set<string>>(); // userId -> productIds
   consents: { userId: string; kind: string; granted: boolean; policyVersion?: string; at: number }[] = [];
   privacy = new Map<string, PrivacyRequest>();
-  tokens = new Map<string, { userId: string; kind: "verify" | "reset"; expiresAt: number }>();
+  tokens = new Map<string, { userId: string; kind: "verify" | "reset" | "invite"; expiresAt: number }>();
   settings: Record<string, string> = { displayMode: "GHS" };
   adminSetupClosed = false;
   redemptions = new Map<string, number>(); // `${userId}|${code}`

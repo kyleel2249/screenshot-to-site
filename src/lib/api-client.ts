@@ -44,6 +44,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     zones: () => get<{ id: string; name: string; regions: string[]; currency: Currency; baseFee: number; estimate: string }[]>("/api/shipping-zones"),
     support: (b: { email: string; subject: string; body: string }) => post<{ id: string }>("/api/support", b),
     register: (b: { email: string; password: string; firstName: string; lastName: string; acceptTerms: boolean; marketingConsent?: boolean }) => post<{ ok: true }>("/api/register", b),
+    acceptInvite: (token: string, password: string) => post<{ ok: true }>("/api/staff/accept-invite", { token, password }),
     verifyEmail: (token: string) => post<{ ok: true }>("/api/verify-email", { token }),
     login: (email: string, password: string) => post<{ ok: true }>("/api/login", { email, password }),
     logout: () => post<{ ok: true }>("/api/logout"),
@@ -88,6 +89,10 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
           return { ok: false, status: res.status, data: null, errors: [msg] };
         } catch { return { ok: false, status: 0, data: null, errors: ["Network error. Check your connection and try again."] }; }
       },
+      staff: () => get<StaffMember[]>(`${portal}/api/staff`),
+      inviteStaff: (email: string, roles: string[]) => post(`${portal}/api/staff/invite`, { email, roles }),
+      setStaffRoles: (userId: string, roles: string[]) => post(`${portal}/api/staff/roles`, { userId, roles }),
+      setStaffActive: (userId: string, active: boolean) => post(`${portal}/api/staff/active`, { userId, active }),
       tickets: () => get<Ticket[]>(`${portal}/api/tickets`),
       replyTicket: (ticketId: string, body: string, internal = false) => post(`${portal}/api/tickets/reply`, { ticketId, body, internal }),
       setTicketStatus: (ticketId: string, status: Ticket["status"]) => post(`${portal}/api/tickets/status`, { ticketId, status }),
@@ -103,6 +108,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
   };
 }
 export interface AdminProduct { id: string; slug: string; name: string; archived: boolean; variantId: string | null; sku: string | null; availability: Availability | null; published: boolean; price: Partial<Record<Currency, number>>; salePrice: Partial<Record<Currency, number>> | null; onHand: number; reserved: number; preOrderEnabled: boolean }
+export interface StaffMember { id: string; email: string; roles: string[]; state: "active" | "invited" | "suspended"; createdAt: number }
 export interface Ticket { id: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: string; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }
 export interface Analytics { days: number; funnel: { productViews: number; addToCart: number; checkoutStarts: number; paidOrders: number }; revenue: Record<string, { gross: number; refunds: number; net: number; orders: number }> }
 export interface AdminZone { id: string; name: string; regions: string[]; currency: Currency; baseFee: number; perKgFee: number; freeOver?: number; estimate: string; quotationOnly?: boolean }

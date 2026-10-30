@@ -18,5 +18,5 @@ export function buildSitemap(i: SitemapInput): string {
 export function buildRobots(siteUrl: string, portalPath?: string | null): string {
   // The portal path is deliberately NOT listed (listing it would reveal it); it is protected by auth and noindex headers instead.
   void portalPath;
-  return ["User-agent: *", "Allow: /", "Disallow: /cart", "Disallow: /checkout", "Disallow: /account", "Disallow: /login", "Disallow: /register", "Disallow: /track", "Disallow: /reset-password", "Disallow: /verify-email", `Sitemap: ${siteUrl.replace(/\/+$/, "")}/sitemap.xml`, ""].join("\n");
+  return ["User-agent: *", "Allow: /", "Disallow: /cart", "Disallow: /checkout", "Disallow: /account", "Disallow: /login", "Disallow: /register", "Disallow: /track", "Disallow: /reset-password", "Disallow: /verify-email", "Disallow: /accept-invite", `Sitemap: ${siteUrl.replace(/\/+$/, "")}/sitemap.xml`, ""].join("\n");
 }

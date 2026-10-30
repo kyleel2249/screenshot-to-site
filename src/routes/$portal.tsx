@@ -1,7 +1,7 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone, Analytics, Ticket } from "@/lib/api-client";
+import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone, Analytics, StaffMember, Ticket } from "@/lib/api-client";
 import { childrenOf, topLevel, type CategoryNode } from "@/lib/domain/categories";
 import { formatMoney } from "@/lib/domain/money";
 import { GHANA_REGIONS } from "@/lib/domain/regions";
@@ -20,7 +20,7 @@ export const Route = createFileRoute("/$portal")({
   component: Dashboard,
 });
 
-type Tab = "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
+type Tab = "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
 const AVAIL = Object.keys(AVAILABILITY_LABEL) as Availability[];
 
 function Dashboard() {
@@ -44,9 +44,9 @@ function Dashboard() {
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => setState("login"))}>Sign out</button>
       </header>
       <nav className="mt-6 flex gap-2" aria-label="Sections" role="tablist">
-        {(["products", "orders", "support", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
+        {(["products", "orders", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
       </nav>
-      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
+      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
     </div>
   );
 }
@@ -343,6 +343,38 @@ function AnalyticsView({ admin }: { admin: Admin }) {
           <tr><th className="py-1 font-medium">Added to cart</th><td>{f.addToCart}</td><td className="text-muted-foreground">{pct(f.addToCart, f.productViews)}</td></tr>
           <tr><th className="py-1 font-medium">Started checkout</th><td>{f.checkoutStarts}</td><td className="text-muted-foreground">{pct(f.checkoutStarts, f.addToCart)}</td></tr>
           <tr><th className="py-1 font-medium">Paid orders</th><td>{f.paidOrders}</td><td /></tr></tbody></table>}</section>
+    </div>
+  );
+}
+
+const ROLE_HELP: Record<string, string> = { manager: "Everything except staff management", inventory: "Products, stock, categories", fulfilment: "View and update orders", support: "Orders, customers, support inbox", marketing: "Discounts, content, analytics", finance: "Refunds, exports, analytics", analyst: "Read-only products, orders, analytics" };
+function StaffTab({ admin }: { admin: Admin }) {
+  const { data, errors, reload, setErrors } = useLoad<StaffMember[]>(useCallback(() => admin.staff(), [admin]));
+  const [email, setEmail] = useState(""); const [roles, setRoles] = useState<string[]>([]); const [msg, setMsg] = useState(""); const [pw, setPw] = useState(""); const [need, setNeed] = useState(false);
+  const run = async (fn: () => Promise<{ ok: boolean; errors: string[] }>, ok: string) => { setMsg(""); setErrors([]); const r = await fn(); if (r.ok) { setMsg(ok); await reload(); } else { setNeed(r.errors.some((e) => /re-?auth/i.test(e))); setErrors(r.errors); } };
+  const tog = (r: string, list: string[], set: (v: string[]) => void) => set(list.includes(r) ? list.filter((x) => x !== r) : [...list, r]);
+  const editRoles = (m: StaffMember) => { const v = window.prompt(`Roles for ${m.email} (comma separated: ${Object.keys(ROLE_HELP).join(", ")})`, m.roles.join(", ")); if (v) void run(() => admin.setStaffRoles(m.id, v.split(",").map((x) => x.trim()).filter(Boolean)), "Roles updated. They must sign in again."); };
+  return (
+    <div className="space-y-6">
+      <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
+      {need && <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void admin.reauth(pw).then((r) => { if (r.ok) { setNeed(false); setPw(""); setErrors([]); setMsg("Confirmed. Retry the action."); } else setErrors(r.errors); }); }}><input aria-label="Confirm your password" type="password" autoComplete="current-password" className={inputCls} value={pw} onChange={(e) => setPw(e.target.value)} /><button className="btn-primary">Confirm</button></form>}
+      <p className="text-sm text-muted-foreground">Invited people choose their own password from a single-use link that expires in 72 hours. Email delivery is not connected yet, so invitations are not sent until a mail provider is configured.</p>
+      <ul className="divide-y divide-border text-sm">{data?.map((m) => (
+        <li key={m.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div><p className="font-semibold">{m.email} <span className="badge-label ml-1">{m.state}</span></p><p className="text-muted-foreground">{m.roles.join(", ")}</p></div>
+          {!m.roles.includes("owner") && <div className="flex gap-3">
+            <button className="underline" onClick={() => editRoles(m)}>Change roles</button>
+            {m.state === "invited" ? <button className="underline" onClick={() => void run(() => admin.inviteStaff(m.email, m.roles), "New invitation issued.")}>Re-invite</button>
+              : <button className="underline" onClick={() => void run(() => admin.setStaffActive(m.id, m.state !== "active"), m.state === "active" ? "Suspended." : "Reactivated.")}>{m.state === "active" ? "Suspend" : "Reactivate"}</button>}
+          </div>}
+        </li>))}</ul>
+      <form className="space-y-3 rounded-lg border border-border p-4" onSubmit={(e) => { e.preventDefault(); void run(() => admin.inviteStaff(email.trim(), roles), "Invitation created.").then(() => { setEmail(""); setRoles([]); }); }}>
+        <h2 className="font-display text-lg font-bold">Invite a team member</h2>
+        <Field label="Email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
+        <fieldset><legend className="mb-1 text-sm font-medium">Roles (least access needed)</legend>
+          {Object.entries(ROLE_HELP).map(([r, h]) => <label key={r} className="flex items-start gap-2 py-0.5 text-sm"><input type="checkbox" className="mt-1" checked={roles.includes(r)} onChange={() => tog(r, roles, setRoles)} /><span><span className="font-medium capitalize">{r}</span> — {h}</span></label>)}</fieldset>
+        <button className="btn-primary" disabled={!roles.length}>Send invitation</button>
+      </form>
     </div>
   );
 }
