@@ -4,16 +4,18 @@ import { useCatalog } from "@/lib/catalog-store";
 import { productsIn, search, sortProducts } from "@/lib/storefront";
 import { childrenOf, topLevel, breadcrumb } from "@/lib/domain/categories";
 import { AVAILABILITY_LABEL } from "@/lib/domain/status";
+import { facets, filterByAttributes, parseFilterParams, toFilterParams } from "@/lib/domain/attributes";
 import { Collection } from "@/components/Collection";
 
 type Sort = "newest" | "price-asc" | "price-desc";
-interface Search { category?: string | undefined; q?: string | undefined; availability?: string | undefined; sort?: Sort | undefined }
+interface Search { category?: string | undefined; q?: string | undefined; availability?: string | undefined; sort?: Sort | undefined; f?: string[] | undefined }
 
 export const Route = createFileRoute("/shop")({
   validateSearch: (s: Record<string, unknown>): Search => ({
     category: typeof s["category"] === "string" ? (s["category"] as string) : undefined,
     q: typeof s["q"] === "string" ? (s["q"] as string) : undefined,
     availability: typeof s["availability"] === "string" ? (s["availability"] as string) : undefined,
+    f: Array.isArray(s["f"]) ? (s["f"] as unknown[]).filter((x): x is string => typeof x === "string").slice(0, 8) : typeof s["f"] === "string" ? [s["f"] as string] : undefined,
     sort: s["sort"] === "price-asc" || s["sort"] === "price-desc" || s["sort"] === "newest" ? (s["sort"] as Sort) : undefined,
   }),
   head: () => ({
@@ -28,12 +30,18 @@ export const Route = createFileRoute("/shop")({
 });
 
 function Shop() {
-  const { category, q, availability, sort } = Route.useSearch();
+  const { category, q, availability, sort, f } = Route.useSearch();
   const navigate = useNavigate({ from: "/shop" });
   const { products, categories } = useCatalog();
   const cat = category ? findBySlug(categories, category) : undefined;
   let list = search(productsIn(products, categories, cat?.id), q ?? "");
   if (availability) list = list.filter((p) => p.availability === availability);
+  // Attribute filters (make/year for cars, size for shoes, …) apply to the profile of the chosen category branch.
+  const profile = cat?.filterProfile;
+  const selected = parseFilterParams(f, profile);
+  // Each facet shows values from the list filtered by the OTHER selections, so choices never lead to an empty result.
+  const facetsFor = cat ? facets(list, profile).map((fc) => ({ ...fc, values: facets(filterByAttributes(list, { ...selected, [fc.key]: "" }), profile).find((x) => x.key === fc.key)?.values ?? [] })) : [];
+  list = filterByAttributes(list, selected);
   list = sortProducts(list, sort);
 
   const pill = (active: boolean) => `rounded-full border px-4 py-1.5 text-sm transition-colors ${active ? "border-primary bg-primary text-primary-foreground" : "border-border hover:border-primary"}`;
@@ -76,7 +84,18 @@ function Shop() {
           </select>
         </label>
       </div>
-      {(q || availability || sort) && <Link to="/shop" search={category ? { category } : {}} className="mt-3 inline-block text-sm text-primary hover:underline">Clear filters</Link>}
+      {facetsFor.length > 0 && (
+        <div className="mt-4 grid gap-3 sm:grid-cols-3 lg:grid-cols-4" role="group" aria-label="Filter by details">
+          {facetsFor.map((fc) => (
+            <label key={fc.key} className="text-sm">{fc.label}
+              <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={selected[fc.key] ?? ""}
+                onChange={(e) => navigate({ search: (s) => { const next = { ...parseFilterParams(s.f, profile), [fc.key]: e.target.value }; const arr = toFilterParams(next); return { ...s, f: arr.length ? arr : undefined }; } })}>
+                <option value="">Any</option>
+                {fc.values.map((v) => <option key={v.value} value={v.value}>{v.value} ({v.count})</option>)}
+              </select>
+            </label>))}
+        </div>)}
+      {(q || availability || sort || (f && f.length > 0)) && <Link to="/shop" search={category ? { category } : {}} className="mt-3 inline-block text-sm text-primary hover:underline">Clear filters</Link>}
     </Collection>
   );
 }

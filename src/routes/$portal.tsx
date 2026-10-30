@@ -1,8 +1,9 @@
+import { attributesFor } from "@/lib/domain/attributes";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { PAY_METHOD_LABELS, type AdminDiscount, type AdminOrder, type AdminProduct, type AdminZone, type AdminQuote, type AdminReview, type Analytics, type PreorderQueueItem, type PurchaseOrder, type StaffMember, type Supplier, type Ticket } from "@/lib/api-client";
-import { childrenOf, topLevel, type CategoryNode } from "@/lib/domain/categories";
+import { childrenOf, topLevel, type CategoryNode, type FilterProfile } from "@/lib/domain/categories";
 import type { Section } from "@/lib/content";
 import { formatMoney } from "@/lib/domain/money";
 import { GHANA_REGIONS } from "@/lib/domain/regions";
@@ -92,6 +93,8 @@ function Products({ admin }: { admin: Admin }) {
   const categories = cats.data ?? [];
   const act = async (fn: () => Promise<{ ok: boolean; errors: string[] }>, ok: string) => { setMsg(""); const r = await fn(); if (r.ok) { setMsg(ok); await reload(); } else setErrors(r.errors); };
   const [nw, setNw] = useState({ name: "", sku: "", categoryId: "", shortDescription: "", image: "", imageAlt: "", priceGhs: "", onHand: "0" });
+  const [nwAttrs, setNwAttrs] = useState<Record<string, string>>({});
+  const profileOf = (categoryId: string) => categories.find((c) => c.id === categoryId)?.filterProfile;
   return (
     <div className="space-y-6">
       <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
@@ -100,13 +103,15 @@ function Products({ admin }: { admin: Admin }) {
         <thead><tr className="border-b border-border"><th className="p-2">Product</th><th className="p-2">Status</th><th className="p-2">Price (GHS)</th><th className="p-2">Stock</th><th className="p-2">Actions</th></tr></thead>
         <tbody>{data?.filter((p) => !p.archived).map((p) => (
           <tr key={p.id} className="border-b border-border align-top">
-            <td className="p-2"><p className="font-medium">{p.name}</p><p className="text-xs text-muted-foreground">{p.sku}</p></td>
+            <td className="p-2"><p className="font-medium">{p.name}</p><p className="text-xs text-muted-foreground">{p.sku}</p>
+              <details className="mt-1"><summary className="cursor-pointer text-xs underline">Filter details</summary>
+                <AttributeEditor key={`${p.id}:${JSON.stringify(p.attributes)}`} profile={profileOf(p.categoryId)} initial={p.attributes} onSave={(a) => act(() => admin.setAttributes(p.id, a), "Details saved.")} /></details></td>
             <td className="p-2"><select aria-label={`Status of ${p.name}`} className={inputCls} value={p.availability ?? ""} onChange={(e) => void act(() => admin.setStatus([p.id], e.target.value as Availability), "Status updated.")}>{AVAIL.map((a) => <option key={a} value={a}>{AVAILABILITY_LABEL[a]}</option>)}</select></td>
             <td className="p-2"><PriceEdit p={p} onSave={(ghs) => act(() => admin.setPrices(p.variantId ?? "", { ghs }), "Price updated.")} /></td>
             <td className="p-2">{p.onHand} <span className="text-xs text-muted-foreground">({p.reserved} reserved)</span><StockEdit onSave={(d, r) => act(() => admin.adjustStock(p.variantId ?? "", d, r), "Stock adjusted.")} /></td>
             <td className="p-2"><button className="underline" onClick={() => void act(() => admin.publish(p.id, !p.published), p.published ? "Unpublished." : "Published.")}>{p.published ? "Unpublish" : "Publish"}</button></td>
           </tr>))}</tbody></table>{data && !data.length && <p className="p-3 text-muted-foreground">No products yet. Add the first one below.</p>}</div>
-      <form className="grid gap-3 rounded-lg border border-border p-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void act(() => admin.createProduct({ ...nw, priceGhs: Math.round(Number(nw.priceGhs) * 100), onHand: Number(nw.onHand), published: false }), "Product created as unpublished.").then(() => setNw({ ...nw, name: "", sku: "" })); }}>
+      <form className="grid gap-3 rounded-lg border border-border p-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void act(() => admin.createProduct({ ...nw, attributes: nwAttrs, priceGhs: Math.round(Number(nw.priceGhs) * 100), onHand: Number(nw.onHand), published: false }), "Product created as unpublished.").then(() => { setNw({ ...nw, name: "", sku: "" }); setNwAttrs({}); }); }}>
         <h2 className="font-display text-lg font-bold sm:col-span-2">Add product</h2>
         <Field label="Name" required value={nw.name} onChange={(e) => setNw({ ...nw, name: e.target.value })} />
         <Field label="SKU" required value={nw.sku} onChange={(e) => setNw({ ...nw, sku: e.target.value })} />
@@ -119,6 +124,9 @@ function Products({ admin }: { admin: Admin }) {
         </div>
         <Field label="Price (GHS)" type="number" step="0.01" min="0" required value={nw.priceGhs} onChange={(e) => setNw({ ...nw, priceGhs: e.target.value })} />
         <Field label="Opening stock" type="number" min="0" value={nw.onHand} onChange={(e) => setNw({ ...nw, onHand: e.target.value })} />
+        {attributesFor(profileOf(nw.categoryId)).length > 0 && nw.categoryId && (
+          <fieldset className="grid gap-3 sm:col-span-2 sm:grid-cols-3"><legend className="mb-1 text-sm font-medium">Filter details (optional — shoppers can filter by these)</legend>
+            <AttributeInputs profile={profileOf(nw.categoryId)} values={nwAttrs} onChange={setNwAttrs} /></fieldset>)}
         <Field label="Short description" required value={nw.shortDescription} onChange={(e) => setNw({ ...nw, shortDescription: e.target.value })} />
         <Field label="Image URL" required value={nw.image} onChange={(e) => setNw({ ...nw, image: e.target.value })} />
         <Field label="Image description (alt text)" required value={nw.imageAlt} onChange={(e) => setNw({ ...nw, imageAlt: e.target.value })} />
@@ -126,6 +134,19 @@ function Products({ admin }: { admin: Admin }) {
       </form>
     </div>
   );
+}
+function AttributeInputs({ profile, values, onChange }: { profile: FilterProfile | undefined; values: Record<string, string>; onChange: (v: Record<string, string>) => void }) {
+  return <>{attributesFor(profile).map((d) => (
+    <label key={d.key} className="text-sm">{d.label}
+      {d.options
+        ? <select className={inputCls} value={values[d.key] ?? ""} onChange={(e) => onChange({ ...values, [d.key]: e.target.value })}><option value="">—</option>{d.options.map((o) => <option key={o} value={o}>{o}</option>)}</select>
+        : <input className={inputCls} inputMode={d.numeric ? "numeric" : "text"} maxLength={60} value={values[d.key] ?? ""} onChange={(e) => onChange({ ...values, [d.key]: e.target.value })} />}
+    </label>))}</>;
+}
+function AttributeEditor({ profile, initial, onSave }: { profile: FilterProfile | undefined; initial: Record<string, string>; onSave: (a: Record<string, string>) => void }) {
+  const [v, setV] = useState<Record<string, string>>(initial);
+  if (!attributesFor(profile).length) return <p className="mt-2 text-xs text-muted-foreground">No filter details for this category.</p>;
+  return <form className="mt-2 grid gap-2" onSubmit={(e) => { e.preventDefault(); onSave(v); }}><AttributeInputs profile={profile} values={v} onChange={setV} /><button className="rounded-full border border-border px-3 py-1 text-xs">Save details</button></form>;
 }
 function PriceEdit({ p, onSave }: { p: AdminProduct; onSave: (ghs: number) => void }) {
   const [v, setV] = useState(((p.price.GHS ?? 0) / 100).toFixed(2));

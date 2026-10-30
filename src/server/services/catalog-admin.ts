@@ -1,3 +1,4 @@
+import { cleanAttributes } from "../../lib/domain/attributes";
 import { addCategory, renameCategory, reorder, setPublished, slugify, type FilterProfile } from "../../lib/domain/categories";
 import type { VariantRecord } from "../../lib/domain/commerce";
 import { sellableQty, type Availability, type PromoWindow } from "../../lib/domain/status";
@@ -9,7 +10,7 @@ export class ValidationError extends Error { constructor(public errors: string[]
 export interface NewProduct {
   name: string; categoryId: string; shortDescription: string; description?: string; image: string; imageAlt: string;
   sku: string; priceGhs?: number; priceUsd?: number; onHand?: number; weightGrams?: number; trackInventory?: boolean;
-  availability?: Availability; promo?: PromoWindow[]; expectedWindow?: string; preOrderEnabled?: boolean; allowBackorder?: boolean; published?: boolean;
+  attributes?: Record<string, string>; availability?: Availability; promo?: PromoWindow[]; expectedWindow?: string; preOrderEnabled?: boolean; allowBackorder?: boolean; published?: boolean;
 }
 const isMinor = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= 0;
 
@@ -22,12 +23,14 @@ export function createProduct(db: MemoryDb, actor: Actor | null, input: NewProdu
   for (const [k, v] of [["GHS price", input.priceGhs], ["USD price", input.priceUsd], ["stock", input.onHand]] as const) if (v !== undefined && !isMinor(v)) errors.push(`${k} must be a non-negative whole number of minor units.`);
   if ([...db.variants.values()].some((v) => v.id.split("::")[1] === input.sku)) errors.push("SKU already exists.");
   if (input.availability === "pre_order" && !input.preOrderEnabled) errors.push("Enable pre-orders explicitly to use the Pre-order status.");
+  const attrs = cleanAttributes(db.categories.find((c) => c.id === input.categoryId)?.filterProfile, input.attributes);
+  errors.push(...attrs.rejected);
   if (errors.length) throw new ValidationError(errors);
 
   let slug = slugify(input.name), n = 2;
   while ([...db.products.values()].some((p) => p.slug === slug)) slug = `${slugify(input.name)}-${n++}`;
   const id = db.nextId("prod"), now = new Date().toISOString();
-  const row: ProductRow = { id, slug, name: input.name.trim(), categoryId: input.categoryId, shortDescription: input.shortDescription, description: input.description ?? input.shortDescription, image: input.image, imageAlt: input.imageAlt, promo: input.promo ?? [], ...(input.expectedWindow ? { expectedWindow: input.expectedWindow } : {}), attributes: {}, createdAt: now, updatedAt: now, archived: false };
+  const row: ProductRow = { id, slug, name: input.name.trim(), categoryId: input.categoryId, shortDescription: input.shortDescription, description: input.description ?? input.shortDescription, image: input.image, imageAlt: input.imageAlt, promo: input.promo ?? [], ...(input.expectedWindow ? { expectedWindow: input.expectedWindow } : {}), attributes: attrs.attributes, createdAt: now, updatedAt: now, archived: false };
   const v: VariantRecord = {
     id: `${id}::${input.sku}`, productId: id, name: input.name.trim(),
     price: { ...(input.priceGhs !== undefined ? { GHS: input.priceGhs } : {}), ...(input.priceUsd !== undefined ? { USD: input.priceUsd } : {}) },
@@ -39,6 +42,17 @@ export function createProduct(db: MemoryDb, actor: Actor | null, input: NewProdu
   db.products.set(id, row); db.variants.set(v.id, v);
   db.log("product.created", { productId: id, sku: input.sku }, actor.id);
   return row;
+}
+
+/** Replaces a product's filter attributes (only keys defined for its category's profile are kept). */
+export function setProductAttributes(db: MemoryDb, actor: Actor | null, productId: string, input: unknown) {
+  requirePermission(actor, "product.write");
+  const pr = db.products.get(productId); if (!pr) throw new ValidationError(["Unknown product."]);
+  const { attributes, rejected } = cleanAttributes(db.categories.find((c) => c.id === pr.categoryId)?.filterProfile, input);
+  if (rejected.length) throw new ValidationError(rejected);
+  pr.attributes = attributes; pr.updatedAt = new Date().toISOString();
+  db.log("product.attributes_updated", { productId }, actor!.id);
+  return attributes;
 }
 
 const variantsOf = (db: MemoryDb, productId: string) => [...db.variants.values()].filter((v) => v.productId === productId);

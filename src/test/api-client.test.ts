@@ -737,3 +737,31 @@ describe("wishlist", () => {
     expect((await c.setWishlist(slug, true)).errors[0]).toMatch(/full/);
   });
 });
+
+import { cleanAttributes, facets, filterByAttributes, parseFilterParams, toFilterParams, attributesFor } from "../lib/domain/attributes";
+describe("category filter attributes", () => {
+  test("pure helpers: only defined keys, fixed options, numeric years, facets with counts, safe URL params", () => {
+    expect(cleanAttributes("vehicle", { make: " Toyota ", year: 2019, fuel: "Diesel", bogus: "x", transmission: "Cvt" })).toEqual({ attributes: { make: "Toyota", year: "2019", fuel: "Diesel" }, rejected: ["Transmission must be one of: Automatic, Manual."] });
+    expect(cleanAttributes("vehicle", { year: "20x9" }).rejected).toEqual(["Year must be a number."]);
+    expect(cleanAttributes("footwear", { make: "Toyota", size: "42" }).attributes).toEqual({ size: "42" }); // key not defined for footwear
+    expect(cleanAttributes("general", null)).toEqual({ attributes: {}, rejected: [] }); expect(cleanAttributes(undefined, "x").attributes).toEqual({});
+    const list = [{ attributes: { make: "Toyota", year: "2019" } }, { attributes: { make: "Toyota", year: "2021" } }, { attributes: { make: "Honda" } }, {}];
+    const f = facets(list, "vehicle"); expect(f.map((x) => x.key)).toEqual(["make", "year"]);
+    expect(f[0]!.values).toEqual([{ value: "Honda", count: 1 }, { value: "Toyota", count: 2 }]); expect(f[1]!.values.map((v) => v.value)).toEqual(["2021", "2019"]);
+    expect(filterByAttributes(list, { make: "toyota", year: "2021" })).toHaveLength(1); expect(filterByAttributes(list, {})).toHaveLength(4); expect(filterByAttributes(list, { make: "Kia" })).toHaveLength(0);
+    expect(parseFilterParams(["make:Toyota", "evil:1", "nocolon", "year:2019", 5], "vehicle")).toEqual({ make: "Toyota", year: "2019" }); expect(parseFilterParams("make:Honda", "vehicle")).toEqual({ make: "Honda" }); expect(parseFilterParams(undefined, "vehicle")).toEqual({});
+    expect(toFilterParams({ make: "Toyota", model: "" })).toEqual(["make:Toyota"]); expect(attributesFor(undefined).length).toBeGreaterThan(0);
+  });
+  test("owners set attributes at creation and later; invalid ones are refused; the public catalogue exposes them", async () => {
+    const { mk, admin } = await shop();
+    const bad = await admin.createProduct({ name: "Corolla", categoryId: "cat-cars--suvs", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "COR", priceGhs: 9000000, onHand: 1, published: true, attributes: { fuel: "Steam" } }); expect(bad.status).toBe(422); expect(bad.errors[0]).toMatch(/Fuel must be one of/);
+    const car = (await admin.createProduct({ name: "Corolla", categoryId: "cat-cars--suvs", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "COR", priceGhs: 9000000, onHand: 1, published: true, attributes: { make: "Toyota", year: "2019", fuel: "Petrol", junk: "x" } })).data!;
+    const pub = async () => (await mk().products()).data!.find((x) => x.name === "Corolla")!;
+    expect((await pub()).attributes).toEqual({ make: "Toyota", year: "2019", fuel: "Petrol" });
+    expect((await admin.setAttributes(car.id, { make: "Honda", transmission: "Automatic" })).data!.attributes).toEqual({ make: "Honda", transmission: "Automatic" });
+    expect((await pub()).attributes).toEqual({ make: "Honda", transmission: "Automatic" });
+    expect((await admin.setAttributes(car.id, { year: "last year" })).status).toBe(422); expect((await admin.setAttributes("nope", {})).status).toBe(422);
+    expect((await admin.products()).data!.find((x) => x.id === car.id)).toMatchObject({ categoryId: "cat-cars--suvs", attributes: { make: "Honda" } });
+    expect((await mk().admin(PORTAL).setAttributes(car.id, {})).status).toBe(404);
+  });
+});

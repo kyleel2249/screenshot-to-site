@@ -27,7 +27,7 @@ import { listQuotes, lookupQuote, requestQuote, respondToQuote, sendQuote } from
 import { confirmMfaSetup, mfaState, resetStaffMfa, startMfaSetup, verifyMfa } from "./services/mfa";
 import { acceptInvite, inviteStaff, listStaff, setStaffActive, setStaffRoles } from "./services/staff";
 import { listTickets, myTickets, openTicket, setTicketStatus, staffReply } from "./services/support";
-import { adjustStock, categoryAdmin, createProduct, setAvailability, setPrices, setPublishedState, ValidationError } from "./services/catalog-admin";
+import { adjustStock, categoryAdmin, createProduct, setAvailability, setProductAttributes, setPrices, setPublishedState, ValidationError } from "./services/catalog-admin";
 import { allocatePreorder, preorderQueue, beginBankTransfer, completeRefund, confirmBankTransfer, getOrderForCustomer, handleVerifiedPayment, listOrdersForCustomer, orderForPayment, placeOrder, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "./services/orders";
 import type { OrderStatus } from "../lib/domain/commerce";
 import type { Availability } from "../lib/domain/status";
@@ -85,7 +85,7 @@ export function publicProducts(db: MemoryDb, now = new Date()) {
     out.push({
       slug: p.slug, name: p.name, categoryId: p.categoryId, createdAt: p.createdAt, shortDescription: p.shortDescription, image: p.image, imageAlt: p.imageAlt,
       availability: effectiveAvailability(v), labels: activePromoLabels(p.promo, v, { ...(p.showLimitedBelow !== undefined ? { showLimitedBelow: p.showLimitedBelow } : {}), hasValidSale: hasSale }, now),
-      price: v.price, salePrice: v.salePrice ?? null, variantId: v.id, rating: summary(db, p.id),
+      price: v.price, salePrice: v.salePrice ?? null, variantId: v.id, rating: summary(db, p.id), attributes: p.attributes ?? {},
       ...(p.showLimitedBelow !== undefined && v.trackInventory && sellableQty(v) > 0 && sellableQty(v) <= p.showLimitedBelow ? { remaining: sellableQty(v) } : {}),
       ...(v.availability === "pre_order" ? { expectedWindow: p.expectedWindow ?? null } : {}),
     });
@@ -179,7 +179,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
           return json(await transact(p, (db) => [...db.products.values()].map((pr) => {
             const v = [...db.variants.values()].find((x) => x.productId === pr.id);
             return { id: pr.id, slug: pr.slug, name: pr.name, archived: pr.archived, variantId: v?.id ?? null, sku: v?.id.split("::")[1] ?? null, availability: v?.availability ?? null, published: v?.published ?? false,
-              price: v?.price ?? {}, salePrice: v?.salePrice ?? null, onHand: v?.onHand ?? 0, reserved: v?.reserved ?? 0, preOrderEnabled: !!v?.preOrder?.enabled };
+              categoryId: pr.categoryId, attributes: pr.attributes ?? {}, price: v?.price ?? {}, salePrice: v?.salePrice ?? null, onHand: v?.onHand ?? 0, reserved: v?.reserved ?? 0, preOrderEnabled: !!v?.preOrder?.enabled };
           })));
         }
         if (sub === "/reauth" && req.method === "POST") return (await transact(p, (db) => reauthenticate(db, sid!, str(body, "password")))) ? json({ ok: true }) : json({ error: "Incorrect password" }, 401);
@@ -187,6 +187,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
           const prod = await transact(p, (db) => createProduct(db, actor, body as never));
           return json({ id: prod.id, slug: prod.slug }, 201);
         }
+        if (sub === "/products/attributes" && req.method === "POST") return json({ attributes: await transact(p, (db) => setProductAttributes(db, actor, str(body, "productId"), body["attributes"])) });
         if (sub === "/products/status" && req.method === "POST") {
           const ids = Array.isArray(body["ids"]) ? (body["ids"] as unknown[]).filter((x): x is string => typeof x === "string") : [];
           await transact(p, (db) => setAvailability(db, actor, ids, str(body, "availability") as Availability)); return json({ ok: true });

@@ -11,7 +11,7 @@ export interface ApiProduct {
   slug: string; name: string; categoryId: string; createdAt: string; shortDescription: string; image: string; imageAlt: string;
   rating?: { count: number; average: number };
   availability: Availability; labels: PromoLabel[]; price: Partial<Record<Currency, number>>; salePrice: Partial<Record<Currency, number>> | null;
-  variantId: string; remaining?: number; expectedWindow?: string | null;
+  variantId: string; remaining?: number; expectedWindow?: string | null; attributes: Record<string, string>;
 }
 export interface ApiOrder {
   id: string; ref: string; status: string; currency: Currency; subtotal: number; discount: number; shipping: number; total: number; hasPreorder: boolean; createdAt: number;
@@ -84,6 +84,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
       products: () => get<AdminProduct[]>(`${portal}/api/products`),
       createProduct: (b: Record<string, unknown>) => post<{ id: string; slug: string }>(`${portal}/api/products`, b),
       setStatus: (ids: string[], availability: Availability) => post(`${portal}/api/products/status`, { ids, availability }),
+      setAttributes: (productId: string, attributes: Record<string, string>) => post<{ attributes: Record<string, string> }>(`${portal}/api/products/attributes`, { productId, attributes }),
       publish: (productId: string, published: boolean) => post(`${portal}/api/products/publish`, { productId, published }),
       setPrices: (variantId: string, p: { ghs?: number; usd?: number; saleGhs?: number; saleUsd?: number }) => post(`${portal}/api/prices`, { variantId, ...p }),
       adjustStock: (variantId: string, delta: number, reason: string) => post(`${portal}/api/stock`, { variantId, delta, reason }),
@@ -140,7 +141,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     }),
   };
 }
-export interface AdminProduct { id: string; slug: string; name: string; archived: boolean; variantId: string | null; sku: string | null; availability: Availability | null; published: boolean; price: Partial<Record<Currency, number>>; salePrice: Partial<Record<Currency, number>> | null; onHand: number; reserved: number; preOrderEnabled: boolean }
+export interface AdminProduct { categoryId: string; attributes: Record<string, string>; id: string; slug: string; name: string; archived: boolean; variantId: string | null; sku: string | null; availability: Availability | null; published: boolean; price: Partial<Record<Currency, number>>; salePrice: Partial<Record<Currency, number>> | null; onHand: number; reserved: number; preOrderEnabled: boolean }
 export interface QuoteView { ref: string; status: "new" | "quoted" | "accepted" | "declined" | "expired"; items: { description: string; qty: number }[]; createdAt: number; quote?: { currency: Currency; total: number; validUntil: number; message: string } }
 export interface AdminQuote { id: string; ref: string; business: string; contactName: string; email: string; phone: string | null; region: string; notes: string; items: { description: string; qty: number }[]; status: QuoteView["status"]; quote: (QuoteView["quote"] & { quotedAt: number }) | null; createdAt: number }
 export interface ReviewList { summary: { count: number; average: number }; reviews: { rating: number; title: string; body: string; author: string; at: number }[]; canReview: boolean; myReview: { status: string } | null }
