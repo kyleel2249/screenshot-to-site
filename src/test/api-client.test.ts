@@ -668,3 +668,40 @@ describe("pre-order allocation from received stock", () => {
     void unpaid;
   });
 });
+
+import { runMaintenance } from "../server/maintenance";
+describe("staff 2FA seed encryption and maintenance", () => {
+  test("the authenticator seed is never stored in plaintext; a legacy plaintext seed still works and is upgraded", async () => {
+    const { p, admin } = await shop();
+    // owner has completed 2FA setup via signInStaff; the stored seed must be sealed
+    const stored = await transact(p, (db) => [...db.users.values()].find((u) => u.email === "owner@shop.test")!.mfa!.secret);
+    expect(stored.startsWith("v1.")).toBe(true);
+    expect((await admin.me()).ok).toBe(true);
+    // simulate a database from before encryption: plaintext seed in the row
+    const seed = "JBSWY3DPEHPK3PXP";
+    const { verifyMfa } = await import("../server/services/mfa");
+    const { totp } = await import("../lib/security/totp");
+    await transact(p, async (db) => {
+      const u = [...db.users.values()].find((x) => x.email === "owner@shop.test")!; u.mfa!.secret = seed; u.mfa!.lastStep = -1; u.mfa!.failures = 0;
+      const sid = "legacy-sid"; db.sessions.set(sid, { id: sid, userId: u.id, expiresAt: Date.now() + 1e6, revoked: false, authAt: Date.now() });
+      const code = await totp(seed, Date.now());
+      expect(await verifyMfa(db, { id: u.id, kind: "staff", roles: u.roles }, sid, code, "s".repeat(32))).toBe(true);
+      expect(u.mfa!.secret.startsWith("v1.")).toBe(true);
+    });
+  });
+  test("maintenance releases expired holds and clears expired sessions/tokens, leaving live ones alone", async () => {
+    const { p, mk, order } = await shop(fake2({}));
+    const o = await order(mk());
+    const now = Date.now();
+    await transact(p, (db) => {
+      db.tokens.set("old", { userId: "u", kind: "reset", expiresAt: now - 1 }); db.tokens.set("live", { userId: "u", kind: "reset", expiresAt: now + 1e6 });
+      db.sessions.set("dead", { id: "dead", userId: "u", expiresAt: now - 1, revoked: false, authAt: 0 });
+    });
+    expect(await runMaintenance(p, now)).toMatchObject({ released: 0, tokens: 1 });
+    const r = await runMaintenance(p, now + 24 * 3_600_000);
+    expect(r.released).toBe(1);
+    const st = await transact(p, (db) => ({ status: [...db.orders.values()].find((x) => x.ref === o.order.ref)!.status, live: db.tokens.has("live"), dead: db.sessions.has("dead") }));
+    expect(st).toMatchObject({ status: "cancelled", live: false /* expired by then */, dead: false });
+    expect((await runMaintenance(p, now + 24 * 3_600_000)).released).toBe(0); // idempotent
+  });
+});

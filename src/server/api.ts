@@ -34,7 +34,7 @@ import type { Availability } from "../lib/domain/status";
 
 export interface Env {
   SESSION_SECRET: string; SITE_ORIGIN: string; ADMIN_BOOTSTRAP_REF_HASH?: string; ADMIN_PORTAL_PATH?: string;
-  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string;
+  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string; DATA_ENCRYPTION_KEY?: string;
 }
 export type NoticeTemplate = "order_received" | "quote_ready" | "ticket_reply";
 export interface Deps {
@@ -104,6 +104,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
     if (!limiters.general.check(`${ip}`).allowed) return json({ error: "Too many requests" }, 429);
 
     const provider = deps.payments ?? providerFromEnv(env);
+    const encKey = env.DATA_ENCRYPTION_KEY || env.SESSION_SECRET; // a dedicated key survives session-secret rotation
     const isWebhook = path === "/api/webhooks/payments" || (!!provider && path === `/api/webhooks/${provider.name}`);
     if (!["GET", "HEAD"].includes(req.method) && !isWebhook) {
       const origin = req.headers.get("origin");
@@ -162,14 +163,14 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       try {
         const mfa = await transact(p, (db) => mfaState(db, actor, sid!));
         if (sub === "/me" && req.method === "GET") return json({ id: actor.id, roles: mfa === "verified" ? actor.roles : [], mfa });
-        if (sub === "/mfa/setup" && req.method === "POST") return json(await transact(p, (db) => startMfaSetup(db, actor)));
+        if (sub === "/mfa/setup" && req.method === "POST") return json(await transact(p, (db) => startMfaSetup(db, actor, encKey)));
         if (sub === "/mfa/confirm" && req.method === "POST") {
           if (!limiters.auth.check(`mfa:${actor.id}`).allowed) return json({ error: "Too many attempts. Try again later." }, 429);
-          return json(await transact(p, (db) => confirmMfaSetup(db, actor, sid!, str(body, "code"))));
+          return json(await transact(p, (db) => confirmMfaSetup(db, actor, sid!, str(body, "code"), encKey)));
         }
         if (sub === "/mfa/verify" && req.method === "POST") {
           if (!limiters.auth.check(`mfa:${actor.id}`).allowed) return json({ error: "Too many attempts. Try again later." }, 429);
-          return (await transact(p, (db) => verifyMfa(db, actor, sid!, str(body, "code")))) ? json({ ok: true }) : json({ error: "That code isn't right." }, 401);
+          return (await transact(p, (db) => verifyMfa(db, actor, sid!, str(body, "code"), encKey))) ? json({ ok: true }) : json({ error: "That code isn't right." }, 401);
         }
         if (mfa !== "verified") return json({ error: "Two-step verification required" }, 403); // nothing else is reachable until the second factor is proven
         if (sub === "/staff/mfa-reset" && req.method === "POST") { await transact(p, (db) => resetStaffMfa(db, actor, str(body, "userId"))); return json({ ok: true }); }

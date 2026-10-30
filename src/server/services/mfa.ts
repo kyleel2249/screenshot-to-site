@@ -5,6 +5,7 @@
 import { randomToken, sha256Hex } from "../../lib/security/crypto";
 import { newTotpSecret, otpauthUri, verifyTotp } from "../../lib/security/totp";
 import type { MemoryDb } from "../db";
+import { open, seal } from "../../lib/security/vault";
 import { requirePermission, type Actor } from "../rbac";
 import { ValidationError } from "./catalog-admin";
 
@@ -18,15 +19,18 @@ const RECOVERY_COUNT = 8;
 const recoveryCode = () => { const t = randomToken().replace(/[^a-z0-9]/gi, "").toLowerCase(); return `${t.slice(0, 5)}-${t.slice(5, 10)}`; };
 
 /** Starts (or restarts, while unconfirmed) enrolment. The secret is shown once for the authenticator app. */
-export function startMfaSetup(db: MemoryDb, actor: Actor) {
+const PURPOSE = "staff-totp";
+/** `key` is the server-side encryption secret; the authenticator seed is stored sealed, never in plaintext. */
+export async function startMfaSetup(db: MemoryDb, actor: Actor, key: string) {
   const u = db.users.get(actor.id); if (!u || u.kind !== "staff") throw new ValidationError(["Not available."]);
   if (u.mfa?.confirmed) throw new ValidationError(["Two-step verification is already set up."]);
-  const secret = newTotpSecret(); u.mfa = { secret, confirmed: false, lastStep: -1, recovery: [] };
+  const secret = newTotpSecret(); u.mfa = { secret: await seal(secret, key, PURPOSE), confirmed: false, lastStep: -1, recovery: [] };
   return { secret, otpauth: otpauthUri(secret, u.email) };
 }
-export async function confirmMfaSetup(db: MemoryDb, actor: Actor, sid: string, code: string, now = Date.now()) {
+export async function confirmMfaSetup(db: MemoryDb, actor: Actor, sid: string, code: string, key: string, now = Date.now()) {
   const u = db.users.get(actor.id); if (!u?.mfa || u.mfa.confirmed) throw new ValidationError(["Start setup first."]);
-  const step = await verifyTotp(u.mfa.secret, code, now);
+  const seed = await open(u.mfa.secret, key, PURPOSE);
+  const step = seed === null ? null : await verifyTotp(seed, code, now);
   if (step === null) throw new ValidationError(["That code isn't right. Check your authenticator app and try again."]);
   const codes = Array.from({ length: RECOVERY_COUNT }, recoveryCode);
   u.mfa = { ...u.mfa, confirmed: true, lastStep: step, recovery: await Promise.all(codes.map((c) => sha256Hex(c))) };
@@ -34,11 +38,12 @@ export async function confirmMfaSetup(db: MemoryDb, actor: Actor, sid: string, c
   db.log("mfa.enabled", { userId: u.id }); return { recoveryCodes: codes }; // shown once; only hashes are stored
 }
 /** Proves the second factor with a TOTP code or a single-use recovery code. */
-export async function verifyMfa(db: MemoryDb, actor: Actor, sid: string, code: string, now = Date.now()): Promise<boolean> {
+export async function verifyMfa(db: MemoryDb, actor: Actor, sid: string, code: string, key: string, now = Date.now()): Promise<boolean> {
   const u = db.users.get(actor.id); const s = db.sessions.get(sid);
   if (!u?.mfa?.confirmed || !s) return false;
-  const step = await verifyTotp(u.mfa.secret, code, now, u.mfa.lastStep);
-  if (step !== null) { u.mfa.lastStep = step; u.mfa.failures = 0; s.mfaOk = true; db.log("mfa.verified", { userId: u.id }); return true; }
+  const seed = await open(u.mfa.secret, key, PURPOSE);
+  const step = seed === null ? null : await verifyTotp(seed, code, now, u.mfa.lastStep);
+  if (step !== null) { if (seed !== null && !u.mfa.secret.startsWith("v1.")) u.mfa.secret = await seal(seed, key, PURPOSE); /* upgrade legacy plaintext */ u.mfa.lastStep = step; u.mfa.failures = 0; s.mfaOk = true; db.log("mfa.verified", { userId: u.id }); return true; }
   const h = await sha256Hex(code.trim().toLowerCase()), i = u.mfa.recovery.indexOf(h);
   if (i >= 0) { u.mfa.recovery.splice(i, 1); u.mfa.failures = 0; s.mfaOk = true; db.log("mfa.recovery_used", { userId: u.id, remaining: u.mfa.recovery.length }); return true; }
   // Persistent (survives restarts and works across server instances): 5 misses in a row end this sign-in.

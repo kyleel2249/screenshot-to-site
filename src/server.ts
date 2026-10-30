@@ -4,6 +4,7 @@ import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 import { createMailer, createNotifier } from "./server/mailer";
 import { route } from "./server/edge";
+import { runMaintenance } from "./server/maintenance";
 import { D1Persistence } from "./server/persistence/sql";
 import type { WorkerEnv } from "./server/worker-entry";
 
@@ -71,5 +72,10 @@ export default {
     // Not configured (e.g. local `vite dev` without bindings): serve pages; the API reports itself unavailable instead of failing obscurely.
     if (new URL(request.url).pathname.startsWith("/api/")) return new Response(JSON.stringify({ error: "Service not configured" }), { status: 503, headers: { "content-type": "application/json" } });
     return renderApp(request, env, ctx);
+  },
+  /** Cron Trigger (see docs/DEPLOYMENT.md): releases expired stock holds and clears expired sessions/tokens. */
+  async scheduled(_event: unknown, env: unknown, ctx: { waitUntil(p: Promise<unknown>): void }) {
+    if (!apiConfigured(env)) return;
+    ctx.waitUntil(runMaintenance(new D1Persistence(env.DB)).catch((e) => { console.error("maintenance failed", e); }));
   },
 };

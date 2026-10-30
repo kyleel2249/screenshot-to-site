@@ -22,6 +22,7 @@ echo -n "<owner enrolment reference>" | bun scripts/hash-bootstrap-ref.ts     # 
 wrangler secret put ADMIN_BOOTSTRAP_REF_HASH
 wrangler secret put ADMIN_PORTAL_PATH      # >=12 chars, [a-z0-9-], must not contain "admin"
 wrangler secret put SESSION_SECRET         # 32+ random bytes
+wrangler secret put DATA_ENCRYPTION_KEY    # 32+ random bytes; encrypts staff authenticator seeds. Keep it separate from SESSION_SECRET and never rotate without re-enrolling staff 2FA. Falls back to SESSION_SECRET if unset.
 wrangler secret put EMAIL_API_KEY          # optional until you choose a provider (Resend adapter built in)
 wrangler secret put EMAIL_FROM
 wrangler secret put PAYMENT_PROVIDER        # "paystack"
@@ -46,7 +47,7 @@ Apply `securityHeaders()` (src/lib/security/headers.ts) to HTML responses with a
 
 ## 6. Before taking real money
 - Provider adapter + webhook mapping to `{eventId, orderRef, amount, currency, status}`; test with sandbox credentials; confirm settlement currency.
-- Scheduled job calling `releaseExpired()` every few minutes (Cron Trigger).
+- Maintenance Cron Trigger: add `"triggers": { "crons": ["*/5 * * * *"] }` to your wrangler config. The Worker's `scheduled` handler releases expired stock holds (bank-transfer holds included) and clears expired sessions and tokens.
 - Backups: `wrangler d1 export` on a schedule to private R2; **perform and record a restore test** — backups are not real until restored.
 - Legal review of the draft policy pages for Ghana; replace demo data and placeholder contact details.
 

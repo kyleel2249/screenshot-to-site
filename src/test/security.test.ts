@@ -103,3 +103,19 @@ describe("password reset", () => {
     expect((await completeReset(store, t2!, GOOD_PW, 31 * 60_000)).ok).toBe(false); // expired
   });
 });
+
+import { open as vaultOpen, seal as vaultSeal, isSealed } from "../lib/security/vault";
+describe("vault (encryption at rest)", () => {
+  test("round-trips, uses a fresh IV, binds to purpose, rejects wrong key and tampering, passes legacy plaintext through", async () => {
+    const key = "k".repeat(32);
+    const a = await vaultSeal("JBSWY3DPEHPK3PXP", key, "staff-totp"), b = await vaultSeal("JBSWY3DPEHPK3PXP", key, "staff-totp");
+    expect(isSealed(a)).toBe(true); expect(a).not.toContain("JBSWY3DP"); expect(a).not.toBe(b);
+    expect(await vaultOpen(a, key, "staff-totp")).toBe("JBSWY3DPEHPK3PXP");
+    expect(await vaultOpen(a, "z".repeat(32), "staff-totp")).toBeNull();
+    expect(await vaultOpen(a, key, "other-purpose")).toBeNull();
+    const [v, iv, ct] = a.split("."); expect(await vaultOpen(`${v}.${iv}.${ct!.slice(0, -2)}AA`, key, "staff-totp")).toBeNull();
+    expect(await vaultOpen("v1.broken", key, "staff-totp")).toBeNull();
+    expect(await vaultOpen("LEGACYPLAINSEED", key, "staff-totp")).toBe("LEGACYPLAINSEED");
+    await expect(vaultSeal("x", "short", "p")).rejects.toThrow();
+  });
+});
