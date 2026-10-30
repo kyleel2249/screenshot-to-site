@@ -31,7 +31,10 @@ export interface Env {
   SESSION_SECRET: string; SITE_ORIGIN: string; ADMIN_BOOTSTRAP_REF_HASH?: string; ADMIN_PORTAL_PATH?: string;
   EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PBKDF2_ITERATIONS?: string;
 }
+export type NoticeTemplate = "order_received" | "quote_ready" | "ticket_reply";
 export interface Deps {
+  /** Informational notices. Carry a reference and a subject line only — never tokens, secrets or message bodies. */
+  notify?: (to: string, template: NoticeTemplate, data: { ref: string; subject?: string }) => Promise<void>;
   /** Outbound email. Tokens are only ever delivered here, never returned in an HTTP response. */
   mail?: (to: string, template: "verify_email" | "password_reset" | "owner_verify" | "staff_invite", data: { token: string }) => Promise<void>;
 }
@@ -188,9 +191,17 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         if (sub === "/staff/roles" && req.method === "POST") { await transact(p, (db) => setStaffRoles(db, actor, str(body, "userId"), body["roles"])); return json({ ok: true }); }
         if (sub === "/staff/active" && req.method === "POST") { await transact(p, (db) => setStaffActive(db, actor, str(body, "userId"), bool(body, "active"))); return json({ ok: true }); }
         if (sub === "/quotes" && req.method === "GET") return json(await transact(p, (db) => listQuotes(db, actor)));
-        if (sub === "/quotes/send" && req.method === "POST") { await transact(p, (db) => sendQuote(db, actor, str(body, "id"), { currency: body["currency"], total: body["total"], validDays: body["validDays"], message: body["message"] })); return json({ ok: true }); }
+        if (sub === "/quotes/send" && req.method === "POST") {
+          const to = await transact(p, (db) => { sendQuote(db, actor, str(body, "id"), { currency: body["currency"], total: body["total"], validDays: body["validDays"], message: body["message"] }); const q = db.quotes.get(str(body, "id"))!; return { email: q.email, ref: q.ref }; });
+          await deps.notify?.(to.email, "quote_ready", { ref: to.ref });
+          return json({ ok: true });
+        }
         if (sub === "/tickets" && req.method === "GET") return json(await transact(p, (db) => listTickets(db, actor)));
-        if (sub === "/tickets/reply" && req.method === "POST") { await transact(p, (db) => staffReply(db, actor, str(body, "ticketId"), str(body, "body"), bool(body, "internal"))); return json({ ok: true }); }
+        if (sub === "/tickets/reply" && req.method === "POST") {
+          const t = await transact(p, (db) => { staffReply(db, actor, str(body, "ticketId"), str(body, "body"), bool(body, "internal")); const x = db.tickets.get(str(body, "ticketId"))!; return { email: x.email, subject: x.subject, id: x.id }; });
+          if (!bool(body, "internal")) await deps.notify?.(t.email, "ticket_reply", { ref: t.id, subject: t.subject }); // internal notes never leave the building
+          return json({ ok: true });
+        }
         if (sub === "/tickets/status" && req.method === "POST") { await transact(p, (db) => setTicketStatus(db, actor, str(body, "ticketId"), str(body, "status") as never)); return json({ ok: true }); }
         if (sub === "/analytics" && req.method === "GET") {
           requirePermission(actor, "analytics.read");
@@ -282,6 +293,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         ...(str(body, "discountCode") ? { discountCode: str(body, "discountCode") } : {}), idempotencyKey: str(body, "idempotencyKey"), acceptedTerms: bool(body, "acceptedTerms"), preorderAcknowledged: bool(body, "preorderAcknowledged"),
       }));
       if (!r.ok) return json({ errors: r.errors }, 422);
+      if (!r.duplicate) { const to = await transact(p, (db) => (r.order.guestEmail ?? (r.order.userId ? db.users.get(r.order.userId)?.email : undefined))); if (to) await deps.notify?.(to, "order_received", { ref: r.order.ref }); }
       return json({ order: orderView(r.order), ...(r.trackingSecret ? { trackingSecret: r.trackingSecret } : {}), paymentRequired: true }, r.duplicate ? 200 : 201);
     }
     if (path === "/api/track" && req.method === "GET") {

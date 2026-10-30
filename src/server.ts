@@ -2,7 +2,7 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
-import { createMailer } from "./server/mailer";
+import { createMailer, createNotifier } from "./server/mailer";
 import { route } from "./server/edge";
 import { D1Persistence } from "./server/persistence/sql";
 import type { WorkerEnv } from "./server/worker-entry";
@@ -67,7 +67,7 @@ function apiConfigured(env: unknown): env is WorkerEnv {
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
-    if (apiConfigured(env)) return route(request, env, new D1Persistence(env.DB), (r) => renderApp(r, env, ctx), { mail: createMailer(env) });
+    if (apiConfigured(env)) return route(request, env, new D1Persistence(env.DB), (r) => renderApp(r, env, ctx), { mail: createMailer(env), notify: createNotifier(env) });
     // Not configured (e.g. local `vite dev` without bindings): serve pages; the API reports itself unavailable instead of failing obscurely.
     if (new URL(request.url).pathname.startsWith("/api/")) return new Response(JSON.stringify({ error: "Service not configured" }), { status: 503, headers: { "content-type": "application/json" } });
     return renderApp(request, env, ctx);

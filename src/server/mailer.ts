@@ -42,3 +42,23 @@ export function createMailer(env: MailEnv, fetchImpl: Fetch = (u, i) => fetch(u,
     } catch { log(`mail:${template} failed (network)`); }
   };
 }
+
+const NOTICE: Record<import("./api").NoticeTemplate, { path: (ref: string) => string; subject: (ref: string, s?: string) => string; body: (ref: string, s?: string) => string; cta: string }> = {
+  order_received: { path: () => "/track", subject: (r) => `We received your order ${r} — Dera Darko Trade`, body: (r) => `Thank you for your order ${r}. Payment is arranged with our team and we'll contact you. Keep the tracking code you were shown at checkout to follow your order.`, cta: "Track your order" },
+  quote_ready: { path: () => "/quote-status", subject: (r) => `Your quote ${r} is ready — Dera Darko Trade`, body: (r) => `A written quote for your request ${r} is ready. Use your reference and the access code you saved to view, accept or decline it.`, cta: "View your quote" },
+  ticket_reply: { path: () => "/account", subject: (_r, s) => `Reply to: ${s ?? "your message"} — Dera Darko Trade`, body: (_r, s) => `We've replied to your message${s ? ` "${s}"` : ""}. Sign in to read it under Account → Messages.`, cta: "Open your account" },
+};
+export function buildNotice(env: Pick<MailEnv, "SITE_ORIGIN">, to: string, template: import("./api").NoticeTemplate, data: { ref: string; subject?: string }): Message {
+  const n = NOTICE[template]; const url = `${env.SITE_ORIGIN.replace(/\/+$/, "")}${n.path(data.ref)}`; const body = n.body(data.ref, data.subject);
+  return { to, subject: n.subject(data.ref, data.subject).replace(/[\r\n]+/g, " "), text: `${body}\n\n${n.cta}: ${url}\n\nDera Darko Trade`, html: `<p>${esc(body)}</p><p><a href="${esc(url)}">${esc(n.cta)}</a></p><p>Dera Darko Trade</p>` };
+}
+export function createNotifier(env: MailEnv, fetchImpl: Fetch = (u, i) => fetch(u, i), log: (m: string) => void = console.error): Deps["notify"] | undefined {
+  if (!env.EMAIL_API_KEY || !env.EMAIL_FROM) return undefined;
+  return async (to, template, data) => {
+    const m = buildNotice(env, to, template, data);
+    try {
+      const res = await fetchImpl("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${env.EMAIL_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ from: env.EMAIL_FROM, to: [m.to], subject: m.subject, text: m.text, html: m.html }) });
+      if (!res.ok) log(`notify:${template} failed with HTTP ${res.status}`);
+    } catch { log(`notify:${template} failed (network)`); }
+  };
+}

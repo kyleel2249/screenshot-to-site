@@ -298,7 +298,7 @@ function Support({ admin }: { admin: Admin }) {
   return (
     <div className="space-y-4">
       <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
-      <p className="text-sm text-muted-foreground">Replies appear in the customer's account under "Messages". Email delivery is not connected yet. Internal notes are never shown to customers.</p>
+      <p className="text-sm text-muted-foreground">Replies appear in the customer's account under "Messages". Customers are emailed a notice when email is configured. Internal notes are never shown to customers.</p>
       <ul className="divide-y divide-border text-sm">{data?.map((t) => (
         <li key={t.id} className="py-3">
           <button className="flex w-full flex-wrap items-center justify-between gap-2 text-left" aria-expanded={open === t.id} onClick={() => setOpen(open === t.id ? null : t.id)}>
@@ -390,7 +390,7 @@ function Quotes({ admin }: { admin: Admin }) {
   return (
     <div className="space-y-4">
       <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
-      <p className="text-sm text-muted-foreground">Requesters see your quote on their status page. Nothing is priced automatically. Email notification is not connected yet, so contact them by email or phone with their reference.</p>
+      <p className="text-sm text-muted-foreground">Requesters see your quote on their status page. Nothing is priced automatically. They are emailed a notice when email is configured; otherwise contact them with their reference.</p>
       <ul className="divide-y divide-border text-sm">{data?.map((q) => (
         <li key={q.id} className="py-3">
           <button className="flex w-full flex-wrap justify-between gap-2 text-left" aria-expanded={open === q.id} onClick={() => setOpen(open === q.id ? null : q.id)}><span className="font-semibold">{q.ref} · {q.business || q.contactName}</span><span className="text-muted-foreground">{q.status}</span></button>

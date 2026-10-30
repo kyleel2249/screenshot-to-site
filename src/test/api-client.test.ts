@@ -299,3 +299,32 @@ describe("wholesale quotes", () => {
     expect((await admin.quotes()).ok).toBe(true); expect((await admin.sendQuote(id2, { currency: "GHS", total: 5, validDays: 1 })).status).toBe(403);
   });
 });
+
+describe("notification emails", () => {
+  test("order, quote and support-reply notices go to the right person; internal notes and duplicates send nothing", async () => {
+    const sent: { to: string; t: string; ref: string }[] = [];
+    const p = new MemoryPersistence();
+    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref") };
+    await transact(p, (db) => { db.zones.set("z", { id: "z", name: "z", regions: ["Greater Accra"], currency: "GHS", baseFee: 2000, perKgFee: 0, estimate: "e" }); });
+    const toks: string[] = [];
+    const mk = () => { let jar = ""; return createClient({ origin: ORIGIN, fetchImpl: async (url, init = {}) => {
+      const h = new Headers(init.headers); h.set("cf-connecting-ip", `10.4.0.${++n}`); if (jar) h.set("cookie", jar);
+      const res = await handle(new Request(ORIGIN + url, { ...init, headers: h }), env, p, { mail: async (_t, _x, d) => { toks.push(d.token); }, notify: async (to, t, d) => { sent.push({ to, t, ref: d.ref }); } });
+      const sc = res.headers.get("set-cookie"); if (sc) jar = sc.split(";")[0]!.endsWith("=") ? "" : sc.split(";")[0]!; return res; } }); };
+    const staff = mk(); const admin = staff.admin(PORTAL);
+    await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await staff.verifyEmail(toks.at(-1)!); await staff.login("owner@shop.test", PW);
+    const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 5, published: true });
+    const buyer = mk();
+    const body = { lines: [{ variantId: `${prod.data!.id}::CAP`, qty: 1 }], currency: "GHS" as const, region: "Greater Accra", zoneId: "z", guestEmail: "g@x.com", address: { recipient: "R", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: "same", acceptedTerms: true };
+    const o = await buyer.checkout(body); await buyer.checkout(body);
+    expect(sent).toEqual([{ to: "g@x.com", t: "order_received", ref: o.data!.order.ref }]);
+    const q = await buyer.requestQuote({ contactName: "K", email: "k@x.com", region: "Volta", items: [{ description: "Bags", qty: 5 }] });
+    await admin.sendQuote((await admin.quotes()).data![0]!.id, { currency: "GHS", total: 1000, validDays: 3 });
+    expect(sent.at(-1)).toEqual({ to: "k@x.com", t: "quote_ready", ref: q.data!.ref });
+    await buyer.support({ email: "h@x.com", subject: "Help", body: "hi" });
+    const tid = (await admin.tickets()).data![0]!.id;
+    await admin.replyTicket(tid, "private note", true); expect(sent.filter((s) => s.t === "ticket_reply")).toHaveLength(0);
+    await admin.replyTicket(tid, "Hello!"); expect(sent.at(-1)).toEqual({ to: "h@x.com", t: "ticket_reply", ref: tid });
+    expect(JSON.stringify(sent)).not.toContain("Hello!"); // bodies never go in notices
+  });
+});

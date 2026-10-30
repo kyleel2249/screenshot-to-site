@@ -27,3 +27,17 @@ describe("mailer", () => {
     expect(logs).toHaveLength(2); expect(logs.join(" ")).not.toContain("SECRET-TOKEN");
   });
 });
+
+import { buildNotice, createNotifier } from "../server/mailer";
+describe("notices", () => {
+  test("no secrets, safe subject lines, correct links; failures are silent and logged", async () => {
+    const n = buildNotice(env, "a@x.com", "ticket_reply", { ref: "tkt_1", subject: "Hi\r\nBcc: evil@x.com" });
+    expect(n.subject).not.toMatch(/[\r\n]/); expect(n.text).toContain("https://shop.test/account");
+    expect(buildNotice(env, "a@x.com", "quote_ready", { ref: "Q-1" }).text).toContain("https://shop.test/quote-status");
+    expect(buildNotice(env, "a@x.com", "order_received", { ref: "ORD-1" }).text).toContain("https://shop.test/track");
+    expect(createNotifier({ SITE_ORIGIN: "https://s" })).toBeUndefined();
+    const logs: string[] = [];
+    await createNotifier(env, async () => new Response("", { status: 429 }), (m) => logs.push(m))!("a@x.com", "quote_ready", { ref: "Q-1" });
+    expect(logs).toEqual(["notify:quote_ready failed with HTTP 429"]);
+  });
+});

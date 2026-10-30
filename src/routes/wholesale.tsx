@@ -22,7 +22,7 @@ function Wholesale() {
   }
   if (done) return (
     <Page title="Quote request received">
-      <Notice>Thank you. Our team will price your request and a written quote will appear on your status page. Prices are never final until quoted.</Notice>
+      <Notice>Thank you. Our team will price your request and a written quote will appear on your status page and we'll email you. Prices are never final until quoted.</Notice>
       <div className="rounded-md border border-border p-4 text-sm"><p className="font-semibold">Save these — the access code is shown only once.</p>
         <p className="mt-2">Reference: <strong>{done.ref}</strong></p><code className="mt-1 block break-all rounded bg-secondary p-2">{done.secret}</code>
         <Link to="/quote-status" search={{ ref: done.ref }} className="mt-3 inline-block underline">Check quote status</Link></div>
