@@ -367,7 +367,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       const found = await transact(p, (db) => orderForPayment(db, actor, str(body, "orderRef"), str(body, "trackingSecret")));
       if (!found) return notFound();
       if ("error" in found) return json({ errors: [found.error] }, 409);
-      const online = methodsFor(found.order.currency).filter((m) => m !== "bank_transfer");
+      const online: PaymentMethod[] = methodsFor(found.order.currency).filter((m) => m !== "bank_transfer");
       if (!online.length) return json({ errors: ["Online payment isn't available for this currency."] }, 503);
       if (method && !online.includes(method)) return json({ errors: [`That payment method isn't available for ${found.order.currency} orders.`] }, 422);
       // Amount and currency come from OUR stored order — never from the request.
