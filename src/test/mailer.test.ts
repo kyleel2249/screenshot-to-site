@@ -41,3 +41,12 @@ describe("notices", () => {
     expect(logs).toEqual(["notify:quote_ready failed with HTTP 429"]);
   });
 });
+
+describe("order lifecycle notices", () => {
+  test("payment and status notices carry only the reference and a status label, never names, addresses or amounts", () => {
+    const u = buildNotice(env, "a@x.com", "order_update", { ref: "DDT-1", subject: "Dispatched\r\nBcc: evil@x.com" });
+    expect(u.subject).toBe("Order DDT-1: Dispatched Bcc: evil@x.com — Dera Darko Trade"); expect(u.subject).not.toMatch(/[\r\n]/); expect(u.text).toContain("https://shop.test/track");
+    const pr = buildNotice(env, "a@x.com", "payment_received", { ref: "DDT-1" }); expect(pr.subject).toContain("Payment received"); expect(pr.text).not.toMatch(/GHS|USD|\d+\.\d\d/);
+    expect(buildNotice(env, "a@x.com", "order_received", { ref: "DDT-1" }).text).not.toMatch(/arranged with our team/);
+  });
+});

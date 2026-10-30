@@ -44,7 +44,9 @@ export function createMailer(env: MailEnv, fetchImpl: Fetch = (u, i) => fetch(u,
 }
 
 const NOTICE: Record<import("./api").NoticeTemplate, { path: (ref: string) => string; subject: (ref: string, s?: string) => string; body: (ref: string, s?: string) => string; cta: string }> = {
-  order_received: { path: () => "/track", subject: (r) => `We received your order ${r} — Dera Darko Trade`, body: (r) => `Thank you for your order ${r}. Payment is arranged with our team and we'll contact you. Keep the tracking code you were shown at checkout to follow your order.`, cta: "Track your order" },
+  order_received: { path: () => "/track", subject: (r) => `We received your order ${r} — Dera Darko Trade`, body: (r) => `Thank you for your order ${r}. Your items are held for a short time while you complete payment; the order is confirmed once payment is verified. Keep the tracking code you were shown at checkout to follow your order.`, cta: "Track your order" },
+  payment_received: { path: () => "/track", subject: (r) => `Payment received for order ${r} — Dera Darko Trade`, body: (r) => `We've received your payment for order ${r}. We'll start preparing it now and keep you posted.`, cta: "Track your order" },
+  order_update: { path: () => "/track", subject: (r, s) => `Order ${r}: ${s ?? "update"} — Dera Darko Trade`, body: (r, s) => `Your order ${r} is now: ${s ?? "updated"}. Use your order reference and tracking code to see the details.`, cta: "Track your order" },
   quote_ready: { path: () => "/quote-status", subject: (r) => `Your quote ${r} is ready — Dera Darko Trade`, body: (r) => `A written quote for your request ${r} is ready. Use your reference and the access code you saved to view, accept or decline it.`, cta: "View your quote" },
   ticket_reply: { path: () => "/account", subject: (_r, s) => `Reply to: ${s ?? "your message"} — Dera Darko Trade`, body: (_r, s) => `We've replied to your message${s ? ` "${s}"` : ""}. Sign in to read it under Account → Messages.`, cta: "Open your account" },
 };

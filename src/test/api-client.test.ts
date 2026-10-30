@@ -419,13 +419,14 @@ describe("editable content pages", () => {
 import { methodFromChannel, paystack, type PaymentProvider } from "../lib/payments/provider";
 import { hmacHex } from "../lib/payments/webhook";
 
-  async function shop(payments?: PaymentProvider, extraEnv: Partial<Env> = {}) {
+  type Notice = { to: string; t: string; ref: string; subject?: string };
+async function shop(payments?: PaymentProvider, extraEnv: Partial<Env> = {}, sink?: Notice[]) {
     const p = new MemoryPersistence();
     const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref"), ...extraEnv };
     await transact(p, (db) => { db.zones.set("z", { id: "z", name: "z", regions: ["Greater Accra"], currency: "GHS", baseFee: 2000, perKgFee: 0, estimate: "e" }); });
     const toks: string[] = [];
-    const call = (path: string, init: RequestInit = {}, h: Record<string, string> = {}) => handle(new Request(ORIGIN + path, { ...init, headers: { "cf-connecting-ip": `10.9.0.${++n}`, ...h } }), env, p, { mail: async (_t, _x, d) => { toks.push(d.token); }, ...(payments ? { payments } : {}) });
-    const mk = () => { let jar = ""; return createClient({ origin: ORIGIN, fetchImpl: async (url, init = {}) => { const h = new Headers(init.headers); h.set("cf-connecting-ip", `10.9.1.${++n}`); if (jar) h.set("cookie", jar); const res = await handle(new Request(ORIGIN + url, { ...init, headers: h }), env, p, { mail: async (_t, _x, d) => { toks.push(d.token); }, ...(payments ? { payments } : {}) }); const sc = res.headers.get("set-cookie"); if (sc) jar = sc.split(";")[0]!.endsWith("=") ? "" : sc.split(";")[0]!; return res; } }); };
+    const call = (path: string, init: RequestInit = {}, h: Record<string, string> = {}) => handle(new Request(ORIGIN + path, { ...init, headers: { "cf-connecting-ip": `10.9.0.${++n}`, ...h } }), env, p, { mail: async (_t, _x, d) => { toks.push(d.token); }, ...(payments ? { payments } : {}), ...(sink ? { notify: async (to, t, d) => { sink.push({ to, t, ...d }); } } : {}) });
+    const mk = () => { let jar = ""; return createClient({ origin: ORIGIN, fetchImpl: async (url, init = {}) => { const h = new Headers(init.headers); h.set("cf-connecting-ip", `10.9.1.${++n}`); if (jar) h.set("cookie", jar); const res = await handle(new Request(ORIGIN + url, { ...init, headers: h }), env, p, { mail: async (_t, _x, d) => { toks.push(d.token); }, ...(payments ? { payments } : {}), ...(sink ? { notify: async (to, t, d) => { sink.push({ to, t, ...d }); } } : {}) }); const sc = res.headers.get("set-cookie"); if (sc) jar = sc.split(";")[0]!.endsWith("=") ? "" : sc.split(";")[0]!; return res; } }); };
     const staff = mk(); const admin = staff.admin(PORTAL);
     await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await staff.verifyEmail(toks.at(-1)!); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 5, published: true });
@@ -846,5 +847,27 @@ describe("bulk product import", () => {
     await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["support"]; });
     const staff = mk(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     expect((await staff.admin(PORTAL).importProducts(good, false)).status).toBe(403);
+  });
+});
+
+describe("customer emails across the order lifecycle", () => {
+  test("payment received, dispatched and delivered notify the right person; internal steps and refused changes stay quiet; bank transfers notify too", async () => {
+    const sink: Notice[] = []; const { mk, order, admin, call } = await shop(fake2({}), { BANK_TRANSFER_DETAILS: "Bank X" }, sink);
+    const c = mk(); const o = await order(c); sink.length = 0;
+    const ev = (id: string) => JSON.stringify({ eventId: id, orderRef: o.order.ref, amount: o.order.total, currency: "GHS", status: "success" });
+    await call("/api/webhooks/fakepay", { method: "POST", body: ev("n1") }, { "x-sig": "good" });
+    await call("/api/webhooks/fakepay", { method: "POST", body: ev("n1") }, { "x-sig": "good" }); // duplicate → no second email
+    expect(sink).toEqual([{ to: "g@x.com", t: "payment_received", ref: o.order.ref }]);
+    const id = (await admin.orders()).data!.find((x) => x.ref === o.order.ref)!.id; sink.length = 0;
+    await admin.setOrderStatus(id, "processing"); await admin.setOrderStatus(id, "preparing_dispatch"); expect(sink).toEqual([]); // internal steps stay quiet
+    await admin.setOrderStatus(id, "dispatched"); expect(sink).toEqual([{ to: "g@x.com", t: "order_update", ref: o.order.ref, subject: "Dispatched" }]);
+    await admin.setOrderStatus(id, "payment_confirmed"); expect(sink.length).toBe(1); // refused change sends nothing
+    await admin.setOrderStatus(id, "in_transit"); expect(sink.length).toBe(1); await admin.setOrderStatus(id, "delivered"); expect(sink.at(-1)).toMatchObject({ t: "order_update", subject: "Delivered" });
+    // bank transfer confirmation
+    const b = await order(mk()); await mk().startBankTransfer(b.order.ref, b.trackingSecret).catch(() => 0);
+    const cb = mk(); const b2 = await order(cb); await cb.startBankTransfer(b2.order.ref, b2.trackingSecret); sink.length = 0;
+    const id2 = (await admin.orders()).data!.find((x) => x.ref === b2.order.ref)!.id;
+    await admin.confirmBankTransfer(id2, 1, "SHORT"); expect(sink).toEqual([]); // wrong amount → under review, no "payment received"
+    await admin.confirmBankTransfer(id2, b2.order.total, "OK-1"); expect(sink).toEqual([{ to: "g@x.com", t: "payment_received", ref: b2.order.ref }]);
   });
 });

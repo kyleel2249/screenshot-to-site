@@ -6,6 +6,7 @@
  *  - the admin API only exists under the secret portal path; unauthenticated probes get a plain 404
  *  - payment webhooks are accepted only with a valid HMAC signature over the raw body
  */
+import { labelOf } from "../lib/order-labels";
 import { importProducts } from "./services/import";
 import { cleanBusiness } from "../lib/business";
 import { sellableQty, effectiveAvailability, activePromoLabels } from "../lib/domain/status";
@@ -38,7 +39,7 @@ export interface Env {
   SESSION_SECRET: string; SITE_ORIGIN: string; ADMIN_BOOTSTRAP_REF_HASH?: string; ADMIN_PORTAL_PATH?: string;
   EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string; DATA_ENCRYPTION_KEY?: string; CSP_MODE?: string; MAINTENANCE_KEY?: string;
 }
-export type NoticeTemplate = "order_received" | "quote_ready" | "ticket_reply";
+export type NoticeTemplate = "order_received" | "order_update" | "payment_received" | "quote_ready" | "ticket_reply";
 export interface Deps {
   /** Payment provider; defaults to the one configured by PAYMENT_PROVIDER / PAYMENT_SECRET_KEY. Injectable for tests. */
   payments?: PaymentProvider;
@@ -72,6 +73,10 @@ async function readBody(req: Request, limit = 200_000): Promise<Body | null> {
   if (text.length > limit) return null;
   try { const v: unknown = JSON.parse(text || "{}"); return v && typeof v === "object" && !Array.isArray(v) ? (v as Body) : null; } catch { return null; }
 }
+
+/** Order statuses worth emailing the customer about. Internal steps (processing, preparing) stay quiet. */
+const NOTIFY_STATUSES = new Set(["ready_for_pickup", "dispatched", "out_for_delivery", "delivered", "delivery_attempted", "cancelled", "returned", "refunded", "partially_refunded"]);
+const emailOfOrder = (db: MemoryDb, o: { guestEmail?: string; userId?: string }) => o.guestEmail ?? (o.userId ? db.users.get(o.userId)?.email : undefined);
 
 const orderView = (o: { id: string; ref: string; status: string; currency: string; total: number; subtotal: number; discount: number; shipping: number; hasPreorder: boolean; createdAt: number; items: { name: string; qty: number; unit: number; line: number; mode: string }[]; history: { to: string; at: number }[] }) =>
   ({ id: o.id, ref: o.ref, status: o.status, currency: o.currency, subtotal: o.subtotal, discount: o.discount, shipping: o.shipping, total: o.total, hasPreorder: o.hasPreorder, createdAt: o.createdAt, items: o.items.map((i) => ({ name: i.name, qty: i.qty, unit: i.unit, line: i.line, mode: i.mode })), history: o.history.map((h) => ({ to: h.to, at: h.at })) });
@@ -123,6 +128,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       if (ev === null) return json({ error: "Invalid signature" }, 401);
       if (ev === "ignored") return json({ received: true, result: "ignored" });
       const r = await transact(p, (db) => handleVerifiedPayment(db, ev));
+      if (r.kind === "applied") { const to = await transact(p, (db) => { const o = [...db.orders.values()].find((x) => x.ref === ev.orderRef); return o ? emailOfOrder(db, o) : undefined; }); if (to) await deps.notify?.(to, "payment_received", { ref: ev.orderRef }); }
       return json({ received: true, result: r.kind });
     }
     if (isWebhook && req.method === "POST") {
@@ -209,10 +215,14 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
           requirePermission(actor, "order.read");
           return json(await transact(p, (db) => [...db.orders.values()].map((o) => ({ ...orderView(o), guestEmail: o.guestEmail ?? null, address: o.address, paymentMethod: o.paymentMethod ?? null }))));
         }
-        if (sub === "/orders/status" && req.method === "POST") { await transact(p, (db) => staffUpdateStatus(db, actor, str(body, "orderId"), str(body, "to") as OrderStatus, str(body, "note") || undefined)); return json({ ok: true }); }
+        if (sub === "/orders/status" && req.method === "POST") {
+          const told = await transact(p, (db) => { staffUpdateStatus(db, actor, str(body, "orderId"), str(body, "to") as OrderStatus, str(body, "note") || undefined); const o = db.orders.get(str(body, "orderId"))!; return NOTIFY_STATUSES.has(o.status) ? { to: emailOfOrder(db, o), ref: o.ref, status: o.status } : null; });
+          if (told?.to) await deps.notify?.(told.to, "order_update", { ref: told.ref, subject: labelOf(told.status) });
+          return json({ ok: true });
+        }
         if (sub === "/preorder-queue" && req.method === "GET") return json(await transact(p, (db) => preorderQueue(db, actor)));
         if (sub === "/orders/allocate-preorder" && req.method === "POST") { await transact(p, (db) => allocatePreorder(db, actor, str(body, "orderId"))); return json({ ok: true }); }
-        if (sub === "/orders/confirm-bank-transfer" && req.method === "POST") { const kind = await transact(p, (db) => confirmBankTransfer(db, actor, str(body, "orderId"), num(body, "amount"), str(body, "reference"))); return json({ ok: true, result: kind }); }
+        if (sub === "/orders/confirm-bank-transfer" && req.method === "POST") { const { kind, to, ref } = await transact(p, (db) => { const kind = confirmBankTransfer(db, actor, str(body, "orderId"), num(body, "amount"), str(body, "reference")); const o = db.orders.get(str(body, "orderId"))!; return { kind, to: emailOfOrder(db, o), ref: o.ref }; }); if (kind === "applied" && to) await deps.notify?.(to, "payment_received", { ref }); return json({ ok: true, result: kind }); }
         if (sub === "/refunds" && req.method === "POST") {
           const r = await transact(p, (db) => requestRefund(db, actor, str(body, "orderId"), num(body, "amount"))); return json(r);
         }
