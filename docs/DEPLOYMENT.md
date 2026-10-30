@@ -27,6 +27,10 @@ wrangler secret put EMAIL_FROM
 wrangler secret put PAYMENT_PROVIDER        # "paystack"
 wrangler secret put PAYMENT_SECRET_KEY      # provider secret key (sk_live_… only after going live)
 wrangler secret put PAYMENT_WEBHOOK_SECRET
+# Payment methods: card and Mobile Money run through the provider above (Mobile Money is GHS-only on Paystack).
+# Bank transfer needs your real account details; it stays hidden until they are set. Staff then confirm receipt in the portal Orders tab
+# (recorded amount + bank reference; a wrong amount goes to manual review, a reused reference is refused). Optional: PAYMENT_METHODS, BANK_TRANSFER_HOLD_HOURS.
+wrangler secret put BANK_TRANSFER_DETAILS
 ```
 `SITE_ORIGIN` (e.g. `https://deradarkotrade.com`) is a plain variable; it is the only origin allowed to make state-changing calls.
 

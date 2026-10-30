@@ -1,7 +1,7 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone, AdminQuote, AdminReview, Analytics, PurchaseOrder, StaffMember, Supplier, Ticket } from "@/lib/api-client";
+import { PAY_METHOD_LABELS, type AdminDiscount, type AdminOrder, type AdminProduct, type AdminZone, type AdminQuote, type AdminReview, type Analytics, type PurchaseOrder, type StaffMember, type Supplier, type Ticket } from "@/lib/api-client";
 import { childrenOf, topLevel, type CategoryNode } from "@/lib/domain/categories";
 import type { Section } from "@/lib/content";
 import { formatMoney } from "@/lib/domain/money";
@@ -138,7 +138,7 @@ function StockEdit({ onSave }: { onSave: (delta: number, reason: string) => void
 
 function Orders({ admin }: { admin: Admin }) {
   const { data, errors, reload, setErrors } = useLoad<AdminOrder[]>(useCallback(() => admin.orders(), [admin]));
-  const [msg, setMsg] = useState(""); const [pw, setPw] = useState(""); const [need, setNeed] = useState(false);
+  const [msg, setMsg] = useState(""); const [pw, setPw] = useState(""); const [need, setNeed] = useState(false); const [bt, setBt] = useState<Record<string, { amount: string; ref: string }>>({});
   const act = async (fn: () => Promise<{ ok: boolean; errors: string[] }>, ok: string) => { setMsg(""); setErrors([]); const r = await fn(); if (r.ok) { setMsg(ok); await reload(); } else { setNeed(r.errors.some((e) => /re-?auth/i.test(e))); setErrors(r.errors); } };
   return (
     <div className="space-y-4">
@@ -154,6 +154,13 @@ function Orders({ admin }: { admin: Admin }) {
           <div className="flex flex-wrap justify-between gap-2"><p className="font-semibold">{o.ref} · {labelOf(o.status)}</p><p>{formatMoney({ amount: o.total, currency: o.currency })}</p></div>
           <p className="text-muted-foreground">{o.address.recipient}, {o.address.street}, {o.address.city}, {o.address.region} · {o.guestEmail ?? "registered customer"}</p>
           <p>{o.items.map((i) => `${i.qty}× ${i.name}`).join(", ")}</p>
+          {o.paymentMethod && <p className="text-muted-foreground">Payment method: {PAY_METHOD_LABELS[o.paymentMethod]}</p>}
+          {o.paymentMethod === "bank_transfer" && (o.status === "pending_payment" || o.status === "payment_under_review") && (
+            <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); const amt = Math.round(Number(bt[o.id]?.amount) * 100); void act(() => admin.confirmBankTransfer(o.id, amt, bt[o.id]?.ref ?? ""), "Bank transfer recorded."); }}>
+              <label className="text-xs">Amount received ({o.currency})<input className={`${inputCls} block w-32`} inputMode="decimal" value={bt[o.id]?.amount ?? ""} onChange={(e) => setBt({ ...bt, [o.id]: { amount: e.target.value, ref: bt[o.id]?.ref ?? "" } })} /></label>
+              <label className="text-xs">Bank reference<input className={`${inputCls} block w-48`} value={bt[o.id]?.ref ?? ""} onChange={(e) => setBt({ ...bt, [o.id]: { amount: bt[o.id]?.amount ?? "", ref: e.target.value } })} /></label>
+              <button className="btn-primary">Confirm money received</button>
+            </form>)}
           <div className="flex flex-wrap gap-2">
             {nextStatuses(o.status).map((s) => s === "refund_pending"
               ? <button key={s} className="rounded-full border border-border px-3 py-1" onClick={() => void act(() => admin.refund(o.id, o.total), "Refund requested.")}>Refund in full</button>

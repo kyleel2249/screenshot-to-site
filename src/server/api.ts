@@ -22,19 +22,19 @@ import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
 import { createPurchaseOrder, listPurchaseOrders, listSuppliers, receivePurchaseOrder, saveSupplier, setPurchaseOrderStatus } from "./services/purchasing";
 import { listForModeration, listPublished, moderate, submitReview, summary } from "./services/reviews";
 import { getPage, listPages, resetPage, savePage } from "./services/content";
-import { providerFromEnv, type PaymentProvider } from "../lib/payments/provider";
+import { isMethod, providerFromEnv, type PaymentMethod, type PaymentProvider } from "../lib/payments/provider";
 import { listQuotes, lookupQuote, requestQuote, respondToQuote, sendQuote } from "./services/quotes";
 import { confirmMfaSetup, mfaState, resetStaffMfa, startMfaSetup, verifyMfa } from "./services/mfa";
 import { acceptInvite, inviteStaff, listStaff, setStaffActive, setStaffRoles } from "./services/staff";
 import { listTickets, myTickets, openTicket, setTicketStatus, staffReply } from "./services/support";
 import { adjustStock, categoryAdmin, createProduct, setAvailability, setPrices, setPublishedState, ValidationError } from "./services/catalog-admin";
-import { completeRefund, getOrderForCustomer, handleVerifiedPayment, listOrdersForCustomer, orderForPayment, placeOrder, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "./services/orders";
+import { beginBankTransfer, completeRefund, confirmBankTransfer, getOrderForCustomer, handleVerifiedPayment, listOrdersForCustomer, orderForPayment, placeOrder, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "./services/orders";
 import type { OrderStatus } from "../lib/domain/commerce";
 import type { Availability } from "../lib/domain/status";
 
 export interface Env {
   SESSION_SECRET: string; SITE_ORIGIN: string; ADMIN_BOOTSTRAP_REF_HASH?: string; ADMIN_PORTAL_PATH?: string;
-  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; PBKDF2_ITERATIONS?: string;
+  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string;
 }
 export type NoticeTemplate = "order_received" | "quote_ready" | "ticket_reply";
 export interface Deps {
@@ -195,9 +195,10 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         if (sub === "/stock" && req.method === "POST") { await transact(p, (db) => adjustStock(db, actor, str(body, "variantId"), num(body, "delta"), str(body, "reason"))); return json({ ok: true }); }
         if (sub === "/orders" && req.method === "GET") {
           requirePermission(actor, "order.read");
-          return json(await transact(p, (db) => [...db.orders.values()].map((o) => ({ ...orderView(o), guestEmail: o.guestEmail ?? null, address: o.address }))));
+          return json(await transact(p, (db) => [...db.orders.values()].map((o) => ({ ...orderView(o), guestEmail: o.guestEmail ?? null, address: o.address, paymentMethod: o.paymentMethod ?? null }))));
         }
         if (sub === "/orders/status" && req.method === "POST") { await transact(p, (db) => staffUpdateStatus(db, actor, str(body, "orderId"), str(body, "to") as OrderStatus, str(body, "note") || undefined)); return json({ ok: true }); }
+        if (sub === "/orders/confirm-bank-transfer" && req.method === "POST") { const kind = await transact(p, (db) => confirmBankTransfer(db, actor, str(body, "orderId"), num(body, "amount"), str(body, "reference"))); return json({ ok: true, result: kind }); }
         if (sub === "/refunds" && req.method === "POST") {
           const r = await transact(p, (db) => requestRefund(db, actor, str(body, "orderId"), num(body, "amount"))); return json(r);
         }
@@ -334,16 +335,44 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       return r.ok ? json({ ok: true }) : json({ errors: r.errors }, 400);
     }
 
-    if (path === "/api/payments/config" && req.method === "GET") return json({ enabled: !!provider, ...(provider ? { provider: provider.name } : {}) });
-    if (path === "/api/payments/start" && req.method === "POST") {
+    // Methods the owner allows (PAYMENT_METHODS, comma-separated; default all). Online methods also need a provider that supports them;
+    // bank transfer needs the owner's bank details to be configured — we never invent account details.
+    const allowed = (env.PAYMENT_METHODS ? env.PAYMENT_METHODS.split(",").map((x) => x.trim()).filter(isMethod) : ["card", "mobile_money", "bank_transfer"]) as PaymentMethod[];
+    const bankDetails = (env.BANK_TRANSFER_DETAILS ?? "").trim().slice(0, 600);
+    const methodsFor = (currency: "GHS" | "USD"): PaymentMethod[] => [
+      ...(provider ? provider.methods(currency).filter((m) => allowed.includes(m)) : []),
+      ...(bankDetails && allowed.includes("bank_transfer") ? (["bank_transfer"] as PaymentMethod[]) : []),
+    ];
+    if (path === "/api/payments/config" && req.method === "GET") {
+      const methods = { GHS: methodsFor("GHS"), USD: methodsFor("USD") };
+      return json({ enabled: methods.GHS.length + methods.USD.length > 0, methods, ...(provider ? { provider: provider.name } : {}) });
+    }
+    if ((path === "/api/payments/start" || path === "/api/payments/bank-transfer") && req.method === "POST") {
       if (!limiters.auth.check(`pay:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
-      if (!provider) return json({ errors: ["Online payment isn't available yet. The business will contact you to arrange payment."] }, 503);
       const { actor } = await who();
+      const bank = path.endsWith("bank-transfer");
+      const method: PaymentMethod | undefined = bank ? "bank_transfer" : isMethod(body["method"]) ? body["method"] : undefined;
+      if (body["method"] !== undefined && !bank && !method) return json({ errors: ["Choose a valid payment method."] }, 422);
+      if (bank) {
+        const r = await transact(p, async (db) => {
+          const found = await orderForPayment(db, actor, str(body, "orderRef"), str(body, "trackingSecret"));
+          if (found && !("error" in found) && !methodsFor(found.order.currency).includes("bank_transfer")) return { error: "Bank transfer isn't available for this order." };
+          return found && "error" in found ? found : found ? beginBankTransfer(db, actor, str(body, "orderRef"), str(body, "trackingSecret"), Number(env.BANK_TRANSFER_HOLD_HOURS) || 24) : null;
+        });
+        if (!r) return notFound();
+        if ("error" in r) return json({ errors: [r.error] }, 409);
+        return json({ instructions: bankDetails, reference: r.order.ref, amount: r.order.total, currency: r.order.currency, holdUntil: r.order.reservedUntil });
+      }
+      if (!provider) return json({ errors: ["Online payment isn't available yet. The business will contact you to arrange payment."] }, 503);
       const found = await transact(p, (db) => orderForPayment(db, actor, str(body, "orderRef"), str(body, "trackingSecret")));
       if (!found) return notFound();
       if ("error" in found) return json({ errors: [found.error] }, 409);
+      const online = methodsFor(found.order.currency).filter((m) => m !== "bank_transfer");
+      if (!online.length) return json({ errors: ["Online payment isn't available for this currency."] }, 503);
+      if (method && !online.includes(method)) return json({ errors: [`That payment method isn't available for ${found.order.currency} orders.`] }, 422);
       // Amount and currency come from OUR stored order — never from the request.
-      const init = await provider.initialize({ orderRef: found.order.ref, amount: found.order.total, currency: found.order.currency, email: found.email, callbackUrl: `${env.SITE_ORIGIN.replace(/\/+$/, "")}/track?ref=${encodeURIComponent(found.order.ref)}` });
+      const init = await provider.initialize({ orderRef: found.order.ref, amount: found.order.total, currency: found.order.currency, email: found.email, callbackUrl: `${env.SITE_ORIGIN.replace(/\/+$/, "")}/track?ref=${encodeURIComponent(found.order.ref)}`, ...(method === "card" || method === "mobile_money" ? { method } : {}) });
+      if (init.ok && method) await transact(p, (db) => { const o = [...db.orders.values()].find((x) => x.ref === found.order.ref); if (o && o.status === "pending_payment") o.paymentMethod = method; });
       return init.ok ? json({ redirectUrl: init.redirectUrl }) : json({ errors: [init.error] }, 502);
     }
     if (path === "/api/checkout" && req.method === "POST") {
@@ -360,7 +389,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       }));
       if (!r.ok) return json({ errors: r.errors }, 422);
       if (!r.duplicate) { const to = await transact(p, (db) => (r.order.guestEmail ?? (r.order.userId ? db.users.get(r.order.userId)?.email : undefined))); if (to) await deps.notify?.(to, "order_received", { ref: r.order.ref }); }
-      return json({ order: orderView(r.order), ...(r.trackingSecret ? { trackingSecret: r.trackingSecret } : {}), paymentRequired: true, paymentAvailable: !!provider }, r.duplicate ? 200 : 201);
+      return json({ order: orderView(r.order), ...(r.trackingSecret ? { trackingSecret: r.trackingSecret } : {}), paymentRequired: true, paymentAvailable: methodsFor(r.order.currency).length > 0, paymentMethods: methodsFor(r.order.currency) }, r.duplicate ? 200 : 201);
     }
     if (path === "/api/track" && req.method === "GET") {
       if (!limiters.auth.check(`track:${ip}`).allowed) return json({ error: "Too many requests" }, 429);

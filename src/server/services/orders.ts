@@ -1,5 +1,6 @@
 import { applyPaymentEvent, canTransition, priceCart, transition, type OrderStatus, type PaymentEvent } from "../../lib/domain/commerce";
 import { money, type Currency } from "../../lib/domain/money";
+import { methodFromChannel } from "../../lib/payments/provider";
 import { randomToken, sha256Hex, timingSafeEqual } from "../../lib/security/crypto";
 import type { MemoryDb, OrderRow } from "../db";
 import { requirePermission, type Actor } from "../rbac";
@@ -83,6 +84,7 @@ export function handleVerifiedPayment(db: MemoryDb, ev: PaymentEvent, now = Date
   if (out.kind !== "applied") return { kind: out.kind };
   const before = o.status;
   o.processedEvents = out.order.processedEvents;
+  const used = methodFromChannel(ev.channel); if (used) o.paymentMethod = used;
   if (out.order.status === "payment_under_review") { if (before !== "payment_under_review") setStatus(o, "payment_under_review", undefined, "Amount/currency mismatch", now); db.log("payment.review", { orderId: o.id }); return { kind: "review" }; }
   // Paid: convert reservation into a committed stock deduction.
   for (const it of o.items) { const v = db.variants.get(it.variantId); if (v && it.mode === "stock" && v.trackInventory) { v.onHand = Math.max(0, v.onHand - it.qty); v.reserved = Math.max(0, v.reserved - it.qty); } }
@@ -155,4 +157,35 @@ export async function orderForPayment(db: MemoryDb, actor: Actor | null, ref: st
   if (o.reservedUntil <= now) return { error: "The payment window for this order has expired. Please place a new order." };
   const email = o.guestEmail ?? (o.userId ? db.users.get(o.userId)?.email : undefined);
   return email ? { order: o, email } : { error: "This order has no email address for the payment receipt." };
+}
+
+/** Customer chooses bank transfer: extends the stock hold (bounded) so there is time to pay, and records the method. */
+export async function beginBankTransfer(db: MemoryDb, actor: Actor | null, ref: string, secret: string, holdHours: number, now = Date.now()): Promise<{ order: OrderRow } | { error: string } | null> {
+  const found = await orderForPayment(db, actor, ref, secret, now);
+  if (!found || "error" in found) return found;
+  const o = found.order, hours = Math.min(72, Math.max(1, Math.floor(holdHours) || 24));
+  o.paymentMethod = "bank_transfer";
+  o.reservedUntil = Math.max(o.reservedUntil, now + hours * 3_600_000);
+  o.bankTransfer = { startedAt: o.bankTransfer?.startedAt ?? now };
+  db.log("payment.bank_transfer_started", { orderId: o.id });
+  return { order: o };
+}
+/**
+ * Staff confirm that money for a bank-transfer order actually arrived. They record the amount received and the bank's
+ * reference; it goes through the same verified-payment path as a provider webhook, so a wrong amount is routed to manual
+ * review instead of being marked paid, and the same bank reference can't be applied twice.
+ */
+export function confirmBankTransfer(db: MemoryDb, actor: Actor | null, orderId: string, amount: number, bankReference: string, now = Date.now()) {
+  requirePermission(actor, "payment.confirm");
+  const o = db.orders.get(orderId);
+  if (!o || o.paymentMethod !== "bank_transfer") throw new ValidationError(["This order isn't waiting on a bank transfer."]);
+  const refText = bankReference.trim().slice(0, 80);
+  if (!refText) throw new ValidationError(["Enter the bank's transaction reference."]);
+  if (!Number.isInteger(amount) || amount <= 0) throw new ValidationError(["Enter the amount received, in pesewas/cents (e.g. 52000 for GHS 520.00)."]);
+  if (o.status !== "pending_payment" && o.status !== "payment_under_review") throw new ValidationError(["This order isn't waiting for payment."]);
+  const r = handleVerifiedPayment(db, { eventId: `bank:${o.id}:${refText.toLowerCase()}`, orderRef: o.ref, amount, currency: o.currency, status: "success", channel: "bank_transfer" }, now);
+  if (r.kind === "duplicate") throw new ValidationError(["That bank reference was already recorded."]);
+  o.bankTransfer = { ...(o.bankTransfer ?? { startedAt: now }), confirmedBy: actor!.id, reference: refText };
+  db.log("payment.bank_transfer_confirmed", { orderId: o.id, result: r.kind }, actor!.id);
+  return r.kind;
 }

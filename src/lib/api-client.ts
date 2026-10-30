@@ -67,9 +67,10 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     exportData: () => get<unknown>("/api/account/export"),
     deleteAccount: () => post<{ ok: true }>("/api/account/delete"),
     checkout: (b: { lines: { variantId: string; qty: number }[]; currency: Currency; region: string; zoneId: string; guestEmail?: string; address: { recipient: string; region: string; city: string; street: string; phone?: string }; discountCode?: string; idempotencyKey: string; acceptedTerms: boolean; preorderAcknowledged?: boolean }) =>
-      post<{ order: ApiOrder; trackingSecret?: string; paymentRequired: boolean; paymentAvailable: boolean }>("/api/checkout", b),
-    paymentConfig: () => get<{ enabled: boolean; provider?: string }>("/api/payments/config"),
-    startPayment: (orderRef: string, trackingSecret?: string) => post<{ redirectUrl: string }>("/api/payments/start", { orderRef, ...(trackingSecret ? { trackingSecret } : {}) }),
+      post<{ order: ApiOrder; trackingSecret?: string; paymentRequired: boolean; paymentAvailable: boolean; paymentMethods: PayMethod[] }>("/api/checkout", b),
+    paymentConfig: () => get<{ enabled: boolean; provider?: string; methods: Record<"GHS" | "USD", PayMethod[]> }>("/api/payments/config"),
+    startPayment: (orderRef: string, trackingSecret?: string, method?: PayMethod) => post<{ redirectUrl: string }>("/api/payments/start", { orderRef, ...(trackingSecret ? { trackingSecret } : {}), ...(method ? { method } : {}) }),
+    startBankTransfer: (orderRef: string, trackingSecret?: string) => post<BankTransferInstructions>("/api/payments/bank-transfer", { orderRef, ...(trackingSecret ? { trackingSecret } : {}) }),
     track: (ref: string, secret: string) => get<{ ref: string; status: string; history: { to: string; at: number }[]; hasPreorder: boolean }>(`/api/track?ref=${encodeURIComponent(ref)}&secret=${encodeURIComponent(secret)}`),
     admin: (portal: string) => ({
       enrol: (b: { reference: string; email: string; password: string }) => post<{ ok: true }>(`${portal}/api/enrol`, b),
@@ -109,6 +110,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
       createPurchaseOrder: (b: { supplierId: string; currency: string; lines: { variantId: string; qty: number; unitCost: number }[]; expectedAt?: string; notes?: string }) => post<{ id: string; ref: string }>(`${portal}/api/purchase-orders`, b),
       setPurchaseOrderStatus: (id: string, to: "ordered" | "cancelled") => post(`${portal}/api/purchase-orders/status`, { id, to }),
       receivePurchaseOrder: (id: string, lines: { variantId: string; qty: number }[]) => post(`${portal}/api/purchase-orders/receive`, { id, lines }),
+      confirmBankTransfer: (orderId: string, amount: number, reference: string) => post<{ result: string }>(`${portal}/api/orders/confirm-bank-transfer`, { orderId, amount, reference }),
       reviews: () => get<AdminReview[]>(`${portal}/api/reviews`),
       moderateReview: (id: string, action: "publish" | "reject") => post(`${portal}/api/reviews/moderate`, { id, action }),
       pages: () => get<(PageContent & { customised: boolean; legal: boolean; updatedAt: number | null })[]>(`${portal}/api/pages`),
@@ -139,6 +141,9 @@ export interface QuoteView { ref: string; status: "new" | "quoted" | "accepted" 
 export interface AdminQuote { id: string; ref: string; business: string; contactName: string; email: string; phone: string | null; region: string; notes: string; items: { description: string; qty: number }[]; status: QuoteView["status"]; quote: (QuoteView["quote"] & { quotedAt: number }) | null; createdAt: number }
 export interface ReviewList { summary: { count: number; average: number }; reviews: { rating: number; title: string; body: string; author: string; at: number }[]; canReview: boolean; myReview: { status: string } | null }
 export interface AdminReview { id: string; product: string; rating: number; title: string; body: string; author: string; status: "pending" | "published" | "rejected"; createdAt: number }
+export type PayMethod = "card" | "mobile_money" | "bank_transfer";
+export const PAY_METHOD_LABELS: Record<PayMethod, string> = { card: "Card", mobile_money: "Mobile Money", bank_transfer: "Bank transfer" };
+export interface BankTransferInstructions { instructions: string; reference: string; amount: number; currency: "GHS" | "USD"; holdUntil: number }
 export interface Supplier { id: string; name: string; contact: string; email: string; phone: string; country: string; notes: string; active: boolean }
 export interface PurchaseOrder { id: string; ref: string; supplierId: string; supplier: string; status: "draft" | "ordered" | "partially_received" | "received" | "cancelled"; currency: string; lines: { variantId: string; name: string; qty: number; unitCost: number; received: number }[]; expectedAt?: string; notes: string; createdAt: number; receipts: { at: number; by: string; lines: { variantId: string; qty: number }[] }[] }
 export interface StaffMember { id: string; email: string; roles: string[]; state: "active" | "invited" | "suspended"; createdAt: number }
@@ -146,5 +151,5 @@ export interface Ticket { id: string; email: string; subject: string; status: "o
 export interface Analytics { days: number; funnel: { productViews: number; addToCart: number; checkoutStarts: number; paidOrders: number }; revenue: Record<string, { gross: number; refunds: number; net: number; orders: number }> }
 export interface AdminZone { id: string; name: string; regions: string[]; currency: Currency; baseFee: number; perKgFee: number; freeOver?: number; estimate: string; quotationOnly?: boolean }
 export interface AdminDiscount { code: string; kind: "percent" | "fixed" | "free_shipping"; value: number; currency?: Currency; startsAt?: string; endsAt?: string; minSubtotal?: number; maxRedemptions?: number; perCustomerLimit?: number; firstPurchaseOnly?: boolean; redeemed: number; active: boolean }
-export interface AdminOrder extends ApiOrder { guestEmail: string | null; address: { recipient: string; region: string; city: string; street: string } }
+export interface AdminOrder extends ApiOrder { paymentMethod: PayMethod | null; guestEmail: string | null; address: { recipient: string; region: string; city: string; street: string } }
 export type Client = ReturnType<typeof createClient>;

@@ -416,13 +416,12 @@ describe("editable content pages", () => {
   });
 });
 
-import { paystack, type PaymentProvider } from "../lib/payments/provider";
+import { methodFromChannel, paystack, type PaymentProvider } from "../lib/payments/provider";
 import { hmacHex } from "../lib/payments/webhook";
 
-describe("online payment flow", () => {
-  async function shop(payments?: PaymentProvider) {
+  async function shop(payments?: PaymentProvider, extraEnv: Partial<Env> = {}) {
     const p = new MemoryPersistence();
-    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref") };
+    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref"), ...extraEnv };
     await transact(p, (db) => { db.zones.set("z", { id: "z", name: "z", regions: ["Greater Accra"], currency: "GHS", baseFee: 2000, perKgFee: 0, estimate: "e" }); });
     const toks: string[] = [];
     const call = (path: string, init: RequestInit = {}, h: Record<string, string> = {}) => handle(new Request(ORIGIN + path, { ...init, headers: { "cf-connecting-ip": `10.9.0.${++n}`, ...h } }), env, p, { mail: async (_t, _x, d) => { toks.push(d.token); }, ...(payments ? { payments } : {}) });
@@ -433,11 +432,12 @@ describe("online payment flow", () => {
     const order = async (c = mk(), key = `k${Math.random()}`) => (await c.checkout({ lines: [{ variantId: `${prod.data!.id}::CAP`, qty: 1 }], currency: "GHS", region: "Greater Accra", zoneId: "z", guestEmail: "g@x.com", address: { recipient: "R", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: key, acceptedTerms: true })).data!;
     return { p, mk, order, call, admin };
   }
-  const fake = (log: { init?: unknown }): PaymentProvider => ({ name: "fakepay", initialize: async (i) => { log.init = i; return { ok: true, redirectUrl: "https://pay.example/session" }; }, parseWebhook: async (raw, h) => (h.get("x-sig") === "good" ? JSON.parse(raw) : null) });
+describe("online payment flow", () => {
+  const fake = (log: { init?: unknown }): PaymentProvider => ({ name: "fakepay", methods: (c) => (c === "GHS" ? ["card", "mobile_money"] : ["card"]), initialize: async (i) => { log.init = i; return { ok: true, redirectUrl: "https://pay.example/session" }; }, parseWebhook: async (raw, h) => (h.get("x-sig") === "good" ? JSON.parse(raw) : null) });
 
   test("without a provider checkout says so honestly and payment can't start", async () => {
     const { mk, order } = await shop(); const c = mk(); const o = await order(c);
-    expect(o.paymentAvailable).toBe(false); expect((await c.paymentConfig()).data).toEqual({ enabled: false });
+    expect(o.paymentAvailable).toBe(false); expect((await c.paymentConfig()).data).toEqual({ enabled: false, methods: { GHS: [], USD: [] } });
     const r = await c.startPayment(o.order.ref, o.trackingSecret); expect(r.status).toBe(503); expect(r.errors[0]).toMatch(/contact you/);
   });
   test("payment starts with the amount from OUR order, only for its owner, once; webhook pays it exactly once", async () => {
@@ -562,3 +562,77 @@ describe("suppliers and purchase orders", () => {
     expect((await admin.suppliers()).status).toBe(403); expect((await admin.purchaseOrders()).status).toBe(403);
   });
 });
+
+describe("payment methods: card, Mobile Money, bank transfer", () => {
+  const BANK = "Bank: Example Bank\nAccount name: Dera Darko Trade\nAccount number: 0000000000";
+  test("config lists methods per currency; bank transfer stays hidden until the owner configures real details", async () => {
+    const log: { init?: any } = {};
+    const none = await shop(fake2(log)); const c0 = none.mk();
+    expect((await c0.paymentConfig()).data).toMatchObject({ enabled: true, methods: { GHS: ["card", "mobile_money"], USD: ["card"] } });
+    const withBank = await shop(fake2(log), { BANK_TRANSFER_DETAILS: BANK }); const c1 = withBank.mk();
+    expect((await c1.paymentConfig()).data!.methods).toEqual({ GHS: ["card", "mobile_money", "bank_transfer"], USD: ["card", "bank_transfer"] });
+    const narrowed = await shop(fake2(log), { BANK_TRANSFER_DETAILS: BANK, PAYMENT_METHODS: "card, bogus" });
+    expect((await narrowed.mk().paymentConfig()).data!.methods.GHS).toEqual(["card"]);
+    const bankOnly = await shop(undefined, { BANK_TRANSFER_DETAILS: BANK });
+    expect((await bankOnly.mk().paymentConfig()).data).toMatchObject({ enabled: true, methods: { GHS: ["bank_transfer"] } });
+  });
+  test("the chosen online method is passed to the provider and validated; Mobile Money is refused for USD orders", async () => {
+    const log: { init?: any } = {}; const { mk, order, admin } = await shop(fake2(log)); const c = mk(); const o = await order(c);
+    expect(o.paymentMethods).toEqual(["card", "mobile_money"]);
+    expect((await c.startPayment(o.order.ref, o.trackingSecret, "mobile_money")).ok).toBe(true);
+    expect(log.init).toMatchObject({ method: "mobile_money", amount: o.order.total });
+    expect((await admin.orders()).data![0]!.paymentMethod).toBe("mobile_money");
+    expect((await c.startPayment(o.order.ref, o.trackingSecret, "bitcoin" as never)).status).toBe(422);
+    expect((await c.startPayment(o.order.ref, o.trackingSecret, "bank_transfer")).status).toBe(422); // bank transfer isn't an online redirect
+    expect((await c.startBankTransfer(o.order.ref, o.trackingSecret)).status).toBe(409 /* not configured → unavailable */);
+  });
+  test("bank transfer: instructions, extended hold, staff confirmation (exact amount, unique reference, wrong amount → review), role-gated", async () => {
+    const { mk, order, admin, p, call } = await shop(undefined, { BANK_TRANSFER_DETAILS: BANK, BANK_TRANSFER_HOLD_HOURS: "48" });
+    const c = mk(); const o = await order(c); expect(o.paymentMethods).toEqual(["bank_transfer"]);
+    expect((await mk().startBankTransfer(o.order.ref, "wrong")).status).toBe(404);
+    const t0 = Date.now();
+    const b = (await c.startBankTransfer(o.order.ref, o.trackingSecret)).data!;
+    expect(b).toMatchObject({ instructions: BANK, reference: o.order.ref, amount: o.order.total, currency: "GHS" });
+    expect(b.holdUntil).toBeGreaterThanOrEqual(t0 + 47 * 3_600_000); expect(b.holdUntil).toBeLessThanOrEqual(Date.now() + 49 * 3_600_000);
+    expect((await admin.orders()).data![0]).toMatchObject({ paymentMethod: "bank_transfer", status: "pending_payment" });
+    // confirmation validation
+    expect((await admin.confirmBankTransfer(o.order.id, o.order.total, "  ")).status).toBe(422);
+    expect((await admin.confirmBankTransfer(o.order.id, -5, "TX1")).status).toBe(422);
+    // wrong amount → manual review, not paid
+    expect((await admin.confirmBankTransfer(o.order.id, 1, "TX-SHORT")).data).toMatchObject({ result: "review" });
+    expect((await admin.orders()).data![0]!.status).toBe("payment_under_review");
+    // correct amount with a fresh reference → paid; the same reference can't be applied twice
+    expect((await admin.confirmBankTransfer(o.order.id, o.order.total, "TX-OK")).data).toMatchObject({ result: "applied" });
+    expect((await admin.orders()).data![0]!.status).toBe("payment_confirmed");
+    expect((await admin.confirmBankTransfer(o.order.id, o.order.total, "TX-OK")).status).toBe(422);
+    // an order that never chose bank transfer can't be confirmed this way
+    const o2 = await order(mk());
+    expect((await admin.confirmBankTransfer(o2.order.id, o2.order.total, "TX-9")).errors[0]).toMatch(/isn't waiting on a bank transfer/);
+    // customers have no access; fulfilment staff can't confirm money
+    expect((await mk().admin(PORTAL).confirmBankTransfer(o.order.id, 1, "x")).status).toBe(404);
+    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["fulfilment"]; });
+    const staff = mk(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
+    expect((await staff.admin(PORTAL).confirmBankTransfer(o2.order.id, o2.order.total, "TX-10")).status).toBe(403);
+    void call;
+  });
+  test("Paystack adapter restricts channels to the chosen method and reports the channel used", async () => {
+    let body: any; const ps = paystack("sk", async (_u, init) => { body = JSON.parse(init.body as string); return new Response(JSON.stringify({ status: true, data: { authorization_url: "https://checkout.paystack.com/x" } })); });
+    expect(ps.methods("GHS")).toEqual(["card", "mobile_money"]); expect(ps.methods("USD")).toEqual(["card"]);
+    const base = { orderRef: "DDT-1", amount: 100, currency: "GHS" as const, email: "a@b.co", callbackUrl: "https://x" };
+    await ps.initialize({ ...base, method: "mobile_money" }); expect(body.channels).toEqual(["mobile_money"]);
+    await ps.initialize({ ...base, method: "card" }); expect(body.channels).toEqual(["card"]);
+    await ps.initialize(base); expect(body.channels).toBeUndefined();
+    expect((await ps.initialize({ ...base, currency: "USD", method: "mobile_money" })).ok).toBe(false);
+    const raw = JSON.stringify({ event: "charge.success", data: { id: 7, reference: "DDT-1.ab", amount: 100, currency: "GHS", status: "success", channel: "mobile_money" } });
+    expect(await ps.parseWebhook(raw, new Headers({ "x-paystack-signature": await hmacHex("sk", raw, "SHA-512") }))).toMatchObject({ channel: "mobile_money" });
+    expect(methodFromChannel("mobile_money")).toBe("mobile_money"); expect(methodFromChannel("ussd")).toBeUndefined();
+  });
+  test("a verified webhook records the channel the customer actually used", async () => {
+    const { mk, order, admin, call } = await shop(fake2({}));
+    const c = mk(); const o = await order(c);
+    const ev = JSON.stringify({ eventId: "ch1", orderRef: o.order.ref, amount: o.order.total, currency: "GHS", status: "success", channel: "card" });
+    await call("/api/webhooks/fakepay", { method: "POST", body: ev }, { "x-sig": "good" });
+    expect((await admin.orders()).data![0]).toMatchObject({ status: "payment_confirmed", paymentMethod: "card" });
+  });
+});
+const fake2 = (log: { init?: unknown }): PaymentProvider => ({ name: "fakepay", methods: (c) => (c === "GHS" ? ["card", "mobile_money"] : ["card"]), initialize: async (i) => { log.init = i; return { ok: true, redirectUrl: "https://pay.example/session" }; }, parseWebhook: async (raw, h) => (h.get("x-sig") === "good" ? JSON.parse(raw) : null) });

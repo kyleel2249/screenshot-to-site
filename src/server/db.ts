@@ -23,7 +23,8 @@ export interface OrderRow {
   id: string; ref: string; userId?: string; guestEmail?: string; idempotencyKey: string; status: OrderStatus; currency: Currency;
   subtotal: number; discount: number; shipping: number; total: number; discountCode?: string; address: { recipient: string; region: string; city: string; street: string; phone?: string };
   items: OrderItemRow[]; hasPreorder: boolean; trackingSecretHash: string; processedEvents: string[]; history: { from: OrderStatus | null; to: OrderStatus; actor?: string; at: number; note?: string }[];
-  reservedUntil: number; createdAt: number; refunded: number;
+  reservedUntil: number; createdAt: number; refunded: number; paymentMethod?: "card" | "mobile_money" | "bank_transfer";
+  bankTransfer?: { startedAt: number; confirmedBy?: string; reference?: string };
 }
 export interface SessionRow { id: string; userId: string; expiresAt: number; revoked: boolean; authAt: number; mfaOk?: boolean }
 export interface TicketRow { id: string; userId?: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: "low" | "normal" | "high"; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }

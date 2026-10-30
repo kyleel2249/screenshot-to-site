@@ -170,7 +170,7 @@ export const CUSTOMER_ALLOWED: OrderStatus[] = ["cancellation_requested"];
 
 /* ---------------------------- Payments (idempotent webhook handling) ---------------------------- */
 
-export interface PaymentEvent { eventId: string; orderRef: string; amount: number; currency: Currency; status: "success" | "failed" }
+export interface PaymentEvent { eventId: string; orderRef: string; amount: number; currency: Currency; status: "success" | "failed"; channel?: string }
 export interface OrderPaymentView { ref: string; total: number; currency: Currency; status: OrderStatus; processedEvents: string[] }
 
 export type WebhookOutcome = { kind: "applied"; order: OrderPaymentView } | { kind: "duplicate" } | { kind: "mismatch"; reason: string } | { kind: "ignored" };
