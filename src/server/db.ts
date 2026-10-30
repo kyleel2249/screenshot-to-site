@@ -72,6 +72,7 @@ export class MemoryDb {
   quotes = new Map<string, QuoteRow>();
   privacy = new Map<string, PrivacyRequest>();
   tokens = new Map<string, { userId: string; kind: "verify" | "reset" | "invite"; expiresAt: number }>();
+  business: import("../lib/business").BusinessInfo = {};
   settings: Record<string, string> = { displayMode: "GHS" };
   adminSetupClosed = false;
   redemptions = new Map<string, number>(); // `${userId}|${code}`

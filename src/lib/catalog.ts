@@ -6,10 +6,5 @@ import { findBySlug, descendantIds } from "@/lib/domain/categories";
  */
 export { findBySlug, descendantIds };
 
-// Placeholder contact details — to be supplied and verified by the business. Never invented.
-export const business = {
-  name: "Dera Darko Trade",
-  email: "To be provided by the owner",
-  phone: "To be provided by the owner",
-  location: "Ghana",
-};
+/** Only the trading name lives in code. Contact, address and registration details are entered by the owner in the portal (see src/lib/site.ts). */
+export const business = { name: "Dera Darko Trade" };

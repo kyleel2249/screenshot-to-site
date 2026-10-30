@@ -6,6 +6,8 @@
  *  - the admin API only exists under the secret portal path; unauthenticated probes get a plain 404
  *  - payment webhooks are accepted only with a valid HMAC signature over the raw body
  */
+import { importProducts } from "./services/import";
+import { cleanBusiness } from "../lib/business";
 import { sellableQty, effectiveAvailability, activePromoLabels } from "../lib/domain/status";
 import type { Currency } from "../lib/domain/money";
 import { verifyWebhook } from "../lib/payments/webhook";
@@ -63,9 +65,11 @@ function cookieOf(req: Request, name: string): string | undefined {
 }
 const sessionCookie = (token: string, maxAge: number) => `${COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`;
 
-async function readBody(req: Request): Promise<Body | null> {
+async function readBody(req: Request, limit = 200_000): Promise<Body | null> {
+  const declared = Number(req.headers.get("content-length") ?? 0);
+  if (declared > limit) return null; // refuse before reading
   const text = await req.text();
-  if (text.length > 200_000) return null;
+  if (text.length > limit) return null;
   try { const v: unknown = JSON.parse(text || "{}"); return v && typeof v === "object" && !Array.isArray(v) ? (v as Body) : null; } catch { return null; }
 }
 
@@ -133,7 +137,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
 
     let body: Body = {};
     if (!["GET", "HEAD"].includes(req.method)) {
-      const parsed = await readBody(req);
+      const parsed = await readBody(req, path.endsWith("/api/products/import") ? 1_300_000 : undefined); // only the staff CSV import may be large
       if (!parsed) return json({ error: "Bad request" }, 400); // malformed or oversized JSON
       body = parsed;
     }
@@ -187,6 +191,12 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
           const prod = await transact(p, (db) => createProduct(db, actor, body as never));
           return json({ id: prod.id, slug: prod.slug }, 201);
         }
+        if (sub === "/products/import" && req.method === "POST") {
+          const dryRun = body["dryRun"] !== false; // checking is the default; saving must be asked for explicitly
+          class DryRun extends Error { constructor(public result: unknown) { super("dry run"); } }
+          try { return json(await transact(p, (db) => { const r = importProducts(db, actor, body["csv"], dryRun); if (dryRun) throw new DryRun(r); return r; })); }
+          catch (e) { if (e instanceof DryRun) return json(e.result); throw e; } // nothing was saved
+        }
         if (sub === "/products/attributes" && req.method === "POST") return json({ attributes: await transact(p, (db) => setProductAttributes(db, actor, str(body, "productId"), body["attributes"])) });
         if (sub === "/products/status" && req.method === "POST") {
           const ids = Array.isArray(body["ids"]) ? (body["ids"] as unknown[]).filter((x): x is string => typeof x === "string") : [];
@@ -230,6 +240,13 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         if (sub === "/purchase-orders" && req.method === "POST") { const po = await transact(p, (db) => createPurchaseOrder(db, actor, body)); return json({ id: po.id, ref: po.ref }, 201); }
         if (sub === "/purchase-orders/status" && req.method === "POST") { await transact(p, (db) => setPurchaseOrderStatus(db, actor, str(body, "id"), body["to"])); return json({ ok: true }); }
         if (sub === "/purchase-orders/receive" && req.method === "POST") { await transact(p, (db) => receivePurchaseOrder(db, actor, str(body, "id"), body["lines"])); return json({ ok: true }); }
+        if (sub === "/business" && req.method === "GET") { requirePermission(actor, "settings.write"); return json(await transact(p, (db) => db.business)); }
+        if (sub === "/business" && req.method === "POST") {
+          requirePermission(actor, "settings.write");
+          const c = cleanBusiness(body); if (!c.ok) return json({ errors: c.errors }, 422);
+          await transact(p, (db) => { db.business = c.info; db.log("business.updated", { fields: Object.keys(c.info).length }, actor!.id); });
+          return json({ ok: true, business: c.info });
+        }
         if (sub === "/reviews" && req.method === "GET") return json(await transact(p, (db) => listForModeration(db, actor)));
         if (sub === "/reviews/moderate" && req.method === "POST") { await transact(p, (db) => moderate(db, actor, str(body, "id"), body["action"])); return json({ ok: true }); }
         if (sub === "/pages" && req.method === "GET") return json(await transact(p, (db) => listPages(db, actor)));
@@ -347,6 +364,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       ...(provider ? provider.methods(currency).filter((m) => allowed.includes(m)) : []),
       ...(bankDetails && allowed.includes("bank_transfer") ? (["bank_transfer"] as PaymentMethod[]) : []),
     ];
+    if (path === "/api/site" && req.method === "GET") return json(await transact(p, (db) => db.business), 200, { "Cache-Control": "public, max-age=300" });
     if (path === "/api/payments/config" && req.method === "GET") {
       const methods = { GHS: methodsFor("GHS"), USD: methodsFor("USD") };
       return json({ enabled: methods.GHS.length + methods.USD.length > 0, methods, ...(provider ? { provider: provider.name } : {}) });

@@ -2,6 +2,7 @@
  * Typed browser client for src/server/api.ts. Same-origin fetch (cookies are HttpOnly and handled by the browser).
  * `fetchImpl` is injectable so the exact same code is tested against the real handler.
  */
+import type { BusinessInfo } from "./business";
 import type { Availability, PromoLabel } from "./domain/status";
 import type { Currency } from "./domain/money";
 import type { PageContent, Section } from "./content";
@@ -69,6 +70,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     deleteAccount: () => post<{ ok: true }>("/api/account/delete"),
     checkout: (b: { lines: { variantId: string; qty: number }[]; currency: Currency; region: string; zoneId: string; guestEmail?: string; address: { recipient: string; region: string; city: string; street: string; phone?: string }; discountCode?: string; idempotencyKey: string; acceptedTerms: boolean; preorderAcknowledged?: boolean }) =>
       post<{ order: ApiOrder; trackingSecret?: string; paymentRequired: boolean; paymentAvailable: boolean; paymentMethods: PayMethod[] }>("/api/checkout", b),
+    site: () => get<BusinessInfo>("/api/site"),
     cart: () => get<{ variantId: string; qty: number }[]>("/api/account/cart"),
     saveCart: (lines: { variantId: string; qty: number }[]) => put<{ variantId: string; qty: number }[]>("/api/account/cart", { lines }),
     wishlist: () => get<string[]>("/api/account/wishlist"),
@@ -87,6 +89,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
       products: () => get<AdminProduct[]>(`${portal}/api/products`),
       createProduct: (b: Record<string, unknown>) => post<{ id: string; slug: string }>(`${portal}/api/products`, b),
       setStatus: (ids: string[], availability: Availability) => post(`${portal}/api/products/status`, { ids, availability }),
+      importProducts: (csv: string, dryRun: boolean) => post<{ dryRun: boolean; count: number; created: { row: number; name: string; sku: string }[] }>(`${portal}/api/products/import`, { csv, dryRun }),
       setAttributes: (productId: string, attributes: Record<string, string>) => post<{ attributes: Record<string, string> }>(`${portal}/api/products/attributes`, { productId, attributes }),
       publish: (productId: string, published: boolean) => post(`${portal}/api/products/publish`, { productId, published }),
       setPrices: (variantId: string, p: { ghs?: number; usd?: number; saleGhs?: number; saleUsd?: number }) => post(`${portal}/api/prices`, { variantId, ...p }),
@@ -118,6 +121,8 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
       receivePurchaseOrder: (id: string, lines: { variantId: string; qty: number }[]) => post(`${portal}/api/purchase-orders/receive`, { id, lines }),
       preorderQueue: () => get<PreorderQueueItem[]>(`${portal}/api/preorder-queue`),
       allocatePreorder: (orderId: string) => post(`${portal}/api/orders/allocate-preorder`, { orderId }),
+      business: () => get<BusinessInfo>(`${portal}/api/business`),
+      saveBusiness: (b: BusinessInfo) => post<{ business: BusinessInfo }>(`${portal}/api/business`, b),
       confirmBankTransfer: (orderId: string, amount: number, reference: string) => post<{ result: string }>(`${portal}/api/orders/confirm-bank-transfer`, { orderId, amount, reference }),
       reviews: () => get<AdminReview[]>(`${portal}/api/reviews`),
       moderateReview: (id: string, action: "publish" | "reject") => post(`${portal}/api/reviews/moderate`, { id, action }),

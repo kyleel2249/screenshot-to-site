@@ -1,3 +1,5 @@
+import { IMPORT_TEMPLATE } from "@/lib/import-template";
+import { BUSINESS_FIELDS, type BusinessInfo } from "@/lib/business";
 import { attributesFor } from "@/lib/domain/attributes";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -22,7 +24,7 @@ export const Route = createFileRoute("/$portal")({
   component: Dashboard,
 });
 
-type Tab = "purchasing" | "reviews" | "content" | "quotes" | "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
+type Tab = "business" | "purchasing" | "reviews" | "content" | "quotes" | "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
 const AVAIL = Object.keys(AVAILABILITY_LABEL) as Availability[];
 
 function Dashboard() {
@@ -48,9 +50,9 @@ function Dashboard() {
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => setState("login"))}>Sign out</button>
       </header>
       <nav className="mt-6 flex gap-2" aria-label="Sections" role="tablist">
-        {(["products", "orders", "purchasing", "reviews", "content", "quotes", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
+        {(["products", "orders", "purchasing", "business", "reviews", "content", "quotes", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
       </nav>
-      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "purchasing" ? <Purchasing admin={admin} /> : tab === "reviews" ? <ReviewsTab admin={admin} /> : tab === "content" ? <ContentTab admin={admin} /> : tab === "quotes" ? <Quotes admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
+      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "business" ? <BusinessTab admin={admin} /> : tab === "purchasing" ? <Purchasing admin={admin} /> : tab === "reviews" ? <ReviewsTab admin={admin} /> : tab === "content" ? <ContentTab admin={admin} /> : tab === "quotes" ? <Quotes admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
     </div>
   );
 }
@@ -111,6 +113,7 @@ function Products({ admin }: { admin: Admin }) {
             <td className="p-2">{p.onHand} <span className="text-xs text-muted-foreground">({p.reserved} reserved)</span><StockEdit onSave={(d, r) => act(() => admin.adjustStock(p.variantId ?? "", d, r), "Stock adjusted.")} /></td>
             <td className="p-2"><button className="underline" onClick={() => void act(() => admin.publish(p.id, !p.published), p.published ? "Unpublished." : "Published.")}>{p.published ? "Unpublish" : "Publish"}</button></td>
           </tr>))}</tbody></table>{data && !data.length && <p className="p-3 text-muted-foreground">No products yet. Add the first one below.</p>}</div>
+      <ImportProducts admin={admin} onDone={reload} />
       <form className="grid gap-3 rounded-lg border border-border p-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void act(() => admin.createProduct({ ...nw, attributes: nwAttrs, priceGhs: Math.round(Number(nw.priceGhs) * 100), onHand: Number(nw.onHand), published: false }), "Product created as unpublished.").then(() => { setNw({ ...nw, name: "", sku: "" }); setNwAttrs({}); }); }}>
         <h2 className="font-display text-lg font-bold sm:col-span-2">Add product</h2>
         <Field label="Name" required value={nw.name} onChange={(e) => setNw({ ...nw, name: e.target.value })} />
@@ -616,5 +619,57 @@ function Purchasing({ admin }: { admin: Admin }) {
           </li>))}{pos.data && !pos.data.length && <li className="text-muted-foreground">No purchase orders yet.</li>}</ul>
       </section>
     </div>
+  );
+}
+
+function BusinessTab({ admin }: { admin: Admin }) {
+  const { data, errors, reload, setErrors } = useLoad<BusinessInfo>(useCallback(() => admin.business(), [admin]));
+  const [v, setV] = useState<BusinessInfo>({}); const [msg, setMsg] = useState(""); const [pw, setPw] = useState(""); const [need, setNeed] = useState(false);
+  useEffect(() => { if (data) setV(data); }, [data]);
+  const save = async () => { setMsg(""); setErrors([]); const r = await admin.saveBusiness(v); if (r.ok) { setMsg("Saved. These details now show on the site."); await reload(); } else { setNeed(r.errors.some((e) => /re-?auth/i.test(e))); setErrors(r.errors); } };
+  return (
+    <div className="max-w-2xl space-y-4">
+      <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
+      {need && <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void admin.reauth(pw).then((r) => { if (r.ok) { setNeed(false); setPw(""); setErrors([]); setMsg("Re-authenticated. Save again."); } else setErrors(r.errors); }); }}><input aria-label="Confirm your password" type="password" autoComplete="current-password" className={inputCls} value={pw} onChange={(e) => setPw(e.target.value)} /><button className="btn-primary">Confirm</button></form>}
+      <p className="text-sm text-muted-foreground">Only details you fill in are shown to customers (footer, contact page, About page). Leave a field empty to hide it. Enter real, verified details only.</p>
+      <form className="grid gap-3 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+        {BUSINESS_FIELDS.map((f) => (
+          <label key={f.key} className={`text-sm ${f.multiline ? "sm:col-span-2" : ""}`}>{f.label}
+            {f.multiline
+              ? <textarea rows={2} className={inputCls} placeholder={f.hint} value={v[f.key] ?? ""} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} />
+              : <input className={inputCls} placeholder={f.hint} value={v[f.key] ?? ""} onChange={(e) => setV({ ...v, [f.key]: e.target.value })} />}
+          </label>))}
+        <button className="btn-primary sm:col-span-2">Save business details</button>
+      </form>
+    </div>
+  );
+}
+
+function ImportProducts({ admin, onDone }: { admin: Admin; onDone: () => Promise<void> | void }) {
+  const [csv, setCsv] = useState(""); const [name, setName] = useState(""); const [errors, setErrors] = useState<string[]>([]); const [msg, setMsg] = useState(""); const [checked, setChecked] = useState(false); const [busy, setBusy] = useState(false);
+  const run = async (dryRun: boolean) => {
+    setBusy(true); setErrors([]); setMsg("");
+    const r = await admin.importProducts(csv, dryRun); setBusy(false);
+    if (!r.ok || !r.data) { setChecked(false); setErrors(r.errors); return; }
+    if (dryRun) { setChecked(true); setMsg(`The file is valid: ${r.data.count} product${r.data.count === 1 ? "" : "s"} would be added (as unpublished unless the file says otherwise). Nothing has been saved yet.`); }
+    else { setChecked(false); setCsv(""); setName(""); setMsg(`Imported ${r.data.count} product${r.data.count === 1 ? "" : "s"}.`); await onDone(); }
+  };
+  return (
+    <details className="rounded-lg border border-border p-4">
+      <summary className="cursor-pointer font-display text-lg font-bold">Import products from a spreadsheet (CSV)</summary>
+      <div className="mt-3 space-y-3 text-sm">
+        <p className="text-muted-foreground">Export your spreadsheet as CSV. Required columns: name, sku, category (name, slug or id), short_description, image, image_alt, and price_ghs and/or price_usd. Optional: stock, weight_grams, availability, expected_window, published, description, and attr_… columns (e.g. attr_brand, attr_colour). Prices are written normally, e.g. 12.50. Everything is checked first; if any row has a problem nothing is added.</p>
+        <button type="button" className="underline" onClick={() => { const url = URL.createObjectURL(new Blob([IMPORT_TEMPLATE], { type: "text/csv" })); const a = document.createElement("a"); a.href = url; a.download = "products-template.csv"; a.click(); URL.revokeObjectURL(url); }}>Download a blank template</button>
+        <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
+        <label className="block">CSV file
+          <input type="file" accept=".csv,text/csv" className={inputCls} onChange={(e) => { const f = e.target.files?.[0]; setChecked(false); setMsg(""); setErrors([]); if (!f) return; setName(f.name); void f.text().then(setCsv); }} />
+        </label>
+        {name && <p className="text-muted-foreground">Selected: {name}</p>}
+        <div className="flex gap-3">
+          <button type="button" className="rounded-full border border-border px-4 py-2" disabled={!csv || busy} onClick={() => void run(true)}>Check file</button>
+          <button type="button" className="btn-primary" disabled={!csv || !checked || busy} onClick={() => void run(false)}>Import products</button>
+        </div>
+      </div>
+    </details>
   );
 }

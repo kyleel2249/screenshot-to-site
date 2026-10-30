@@ -793,3 +793,58 @@ describe("saved cart for signed-in customers", () => {
     await alice.saveCart([{ variantId: va, qty: 1 }]); expect((await alice.deleteAccount()).ok).toBe(true);
   });
 });
+
+describe("business details", () => {
+  test("nothing is shown until the owner enters it; validation; sensitive re-auth; unknown keys dropped; role-gated", async () => {
+    const { mk, admin, p } = await shop();
+    expect((await mk().site()).data).toEqual({});
+    expect((await admin.saveBusiness({ email: "not-an-email", phone: "call me" } as never)).errors.length).toBe(2);
+    expect((await admin.saveBusiness({ address: "x".repeat(301) })).status).toBe(422);
+    expect((await admin.saveBusiness({ email: 5 } as never)).errors[0]).toMatch(/must be text/);
+    const saved = (await admin.saveBusiness({ email: " hello@dera.example ", phone: "+233 24 000 0000", whatsapp: "", city: "Accra", hours: "Mon–Sat 9–6", registrationNumber: "CS123", evil: "<script>" } as never)).data!;
+    expect(saved.business).toEqual({ email: "hello@dera.example", phone: "+233 24 000 0000", city: "Accra", hours: "Mon–Sat 9–6", registrationNumber: "CS123" });
+    const pub = (await mk().site()).data!; expect(pub).toEqual(saved.business); expect("whatsapp" in pub).toBe(false); expect("evil" in pub).toBe(false);
+    expect((await admin.business()).data).toEqual(saved.business);
+    await admin.saveBusiness({}); expect((await mk().site()).data).toEqual({}); // clearing hides everything again
+    // stale sign-in → must re-authenticate (settings are a sensitive permission)
+    await transact(p, (db) => { for (const s of db.sessions.values()) s.authAt = Date.now() - 3_600_000; });
+    expect((await admin.saveBusiness({ city: "Accra" })).errors[0]).toMatch(/re-?auth/i);
+    expect((await mk().admin(PORTAL).saveBusiness({ city: "x" })).status).toBe(404);
+    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["fulfilment"]; });
+    const staff = mk(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
+    expect((await staff.admin(PORTAL).saveBusiness({ city: "x" })).status).toBe(403); expect((await staff.admin(PORTAL).business()).status).toBe(403);
+  });
+});
+
+import { parseCsv } from "../lib/csv";
+describe("bulk product import", () => {
+  const HEAD = "name,sku,category,price_ghs,price_usd,stock,short_description,image,image_alt,weight_grams,availability,expected_window,published,attr_brand,attr_colour";
+  test("CSV reader handles quotes, commas, newlines, CRLF and BOM; rejects unclosed quotes", () => {
+    expect(parseCsv('﻿a,b\r\n"x, y","he said ""hi"""\r\n\r\n"multi\nline",z\n')).toEqual([["a", "b"], ["x, y", 'he said "hi"'], ["multi\nline", "z"]]);
+    expect(() => parseCsv('a,"oops')).toThrow(/unclosed/);
+  });
+  test("check first (nothing saved), then import all-or-nothing with row-numbered errors; permissions enforced", async () => {
+    const { mk, admin, p } = await shop();
+    const good = [HEAD, 'Air Max,AM1,Sneakers,450.00,35,10,"Comfy, light",/a.jpg,shoe,900,available,,yes,Nike,Red', 'Pre Drop,PD1,cat-shoes-and-footwear--sneakers,"1,200.50",,0,Coming soon,/b.jpg,drop,,pre-order,Dec 2026,,Adidas,'].join("\n");
+    const check = await admin.importProducts(good, true); expect(check.data).toMatchObject({ dryRun: true, count: 2 });
+    expect((await admin.products()).data!.some((x) => x.sku === "AM1")).toBe(false); // dry run saved nothing
+    expect((await admin.importProducts(good, false)).data).toMatchObject({ dryRun: false, count: 2 });
+    const all = (await admin.products()).data!; const am = all.find((x) => x.sku === "AM1")!, pd = all.find((x) => x.sku === "PD1")!;
+    expect(am).toMatchObject({ price: { GHS: 45000, USD: 3500 }, onHand: 10, published: true, attributes: { brand: "Nike", colour: "Red" } });
+    expect(pd).toMatchObject({ price: { GHS: 120050 }, availability: "pre_order", preOrderEnabled: true, published: false });
+    const names = (await mk().products()).data!.map((x) => x.name); expect(names).toContain("Air Max"); expect(names).not.toContain("Pre Drop"); // only the published one is public
+    // problems: duplicate SKU in file and against the catalogue, bad category/price/stock/availability/attribute; nothing is created
+    const bad = [HEAD, 'A,N1,Nope,10,,1,s,/i,a,,,,,,', 'B,AM1,Sneakers,10,,1,s,/i,a,,,,,,', 'C,N3,Sneakers,ten,,1,s,/i,a,,,,,,', 'D,N4,Sneakers,10,,-2,s,/i,a,,,,,,', 'E,N5,Sneakers,10,,1,s,/i,a,,sold-out,,,,', 'F,N6,Sneakers,10,,1,s,/i,a,,,,,,', 'G,N6,Sneakers,10,,1,s,/i,a,,,,,,'].join("\n");
+    const r = await admin.importProducts(bad, false); expect(r.status).toBe(422);
+    expect(r.errors.join("\n")).toMatch(/Row 2: unknown category/); expect(r.errors.join("\n")).toMatch(/Row 3: SKU "AM1" already exists/); expect(r.errors.join("\n")).toMatch(/Row 4: price_ghs "ten"/); expect(r.errors.join("\n")).toMatch(/Row 5: stock "-2"/); expect(r.errors.join("\n")).toMatch(/Row 6: availability "sold-out"/); expect(r.errors.join("\n")).toMatch(/Row 8: sku "N6" appears more than once/);
+    expect((await admin.products()).data!.length).toBe(3); // the fixture product + the 2 imported; the bad file added nothing
+    // structure errors
+    expect((await admin.importProducts("", true)).status).toBe(422); expect((await admin.importProducts("name,sku\nx,y", true)).errors[0]).toMatch(/"category" column/); expect((await admin.importProducts(HEAD, true)).errors[0]).toMatch(/no products/);
+    expect((await admin.importProducts([HEAD, 'X,X1,Sneakers,1,,1,s,/i,a,,,,,Nike,'].join("\n").replace("Nike,", "Nike,"), true)).ok).toBe(true);
+    expect((await admin.importProducts(HEAD + "\n" + "x".repeat(1_100_000), true)).errors[0]).toMatch(/too large/);
+    expect((await mk().admin(PORTAL).importProducts(good, false)).status).toBe(404);
+    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["support"]; });
+    const staff = mk(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
+    expect((await staff.admin(PORTAL).importProducts(good, false)).status).toBe(403);
+  });
+});

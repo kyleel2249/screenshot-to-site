@@ -16,7 +16,7 @@ const list = [
 ];
 
 describe("storefront helpers", () => {
-  it("reference data is intact", () => { expect(categories.length).toBeGreaterThan(14); expect(business.email).toMatch(/owner/i); });
+  it("reference data is intact", () => { expect(categories.length).toBeGreaterThan(14); expect(business.name).toBe("Dera Darko Trade"); });
   it("parent categories include child products", () => { expect(productsIn(list, categories, "cat-phones-and-accessories").length).toBe(4); expect(productsIn(list, categories, "cat-bags-and-luggage").length).toBe(0); });
   it("search by name or SKU; sort by price and newest", () => {
     expect(search(list, "TOTE").map((x) => x.slug)).toEqual(["tote"]);

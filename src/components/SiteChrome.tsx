@@ -3,7 +3,8 @@ import { ShoppingBag, Menu, X, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import { useCart } from "@/lib/cart";
 import { useCurrency } from "@/lib/currency";
-import { business } from "@/lib/catalog";
+import { useSite } from "@/lib/site";
+import { waLink } from "@/lib/business";
 import { useCatalog } from "@/lib/catalog-store";
 import { ConsentLink } from "@/components/ConsentBanner";
 import { childrenOf, topLevel } from "@/lib/domain/categories";
@@ -74,6 +75,7 @@ export function SiteHeader() {
 }
 
 export function SiteFooter() {
+  const site = useSite();
   const { categories } = useCatalog();
   const info = [
     { to: "/about", label: "About" }, { to: "/faq", label: "FAQ" },
@@ -107,12 +109,18 @@ export function SiteFooter() {
         <div>
           <p className="text-sm font-semibold text-gold">Contact</p>
           <ul className="mt-3 space-y-2 text-sm text-primary-foreground/80">
-            <li>{business.location}</li><li>{business.email}</li><li>{business.phone}</li>
+            {site.address && <li className="whitespace-pre-line">{site.address}{site.city ? `\n${site.city}` : ""}</li>}
+            {!site.address && site.city && <li>{site.city}</li>}
+            {site.email && <li><a href={`mailto:${site.email}`} className="underline-offset-2 hover:underline">{site.email}</a></li>}
+            {site.phone && <li><a href={`tel:${site.phone.replace(/[^+\d]/g, "")}`} className="underline-offset-2 hover:underline">{site.phone}</a></li>}
+            {site.whatsapp && <li><a href={waLink(site.whatsapp)} rel="noopener noreferrer" target="_blank" className="underline-offset-2 hover:underline">WhatsApp</a></li>}
+            {site.hours && <li className="whitespace-pre-line text-primary-foreground/70">{site.hours}</li>}
+            <li><Link to="/contact" className="underline-offset-2 hover:underline">Send us a message</Link></li>
           </ul>
         </div>
       </div>
       <div className="border-t border-primary-foreground/10 py-5 text-center text-xs text-primary-foreground/60">
-        © {new Date().getFullYear()} Dera Darko Trade. Demonstration catalogue — prices shown are not live listings.
+        © {new Date().getFullYear()} Dera Darko Trade.{site.registrationNumber ? ` Registration no. ${site.registrationNumber}.` : ""}
       </div>
     </footer>
   );
