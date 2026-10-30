@@ -415,3 +415,73 @@ describe("editable content pages", () => {
     void staff;
   });
 });
+
+import { paystack, type PaymentProvider } from "../lib/payments/provider";
+import { hmacHex } from "../lib/payments/webhook";
+
+describe("online payment flow", () => {
+  async function shop(payments?: PaymentProvider) {
+    const p = new MemoryPersistence();
+    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref") };
+    await transact(p, (db) => { db.zones.set("z", { id: "z", name: "z", regions: ["Greater Accra"], currency: "GHS", baseFee: 2000, perKgFee: 0, estimate: "e" }); });
+    const toks: string[] = [];
+    const call = (path: string, init: RequestInit = {}, h: Record<string, string> = {}) => handle(new Request(ORIGIN + path, { ...init, headers: { "cf-connecting-ip": `10.9.0.${++n}`, ...h } }), env, p, { mail: async (_t, _x, d) => { toks.push(d.token); }, ...(payments ? { payments } : {}) });
+    const mk = () => { let jar = ""; return createClient({ origin: ORIGIN, fetchImpl: async (url, init = {}) => { const h = new Headers(init.headers); h.set("cf-connecting-ip", `10.9.1.${++n}`); if (jar) h.set("cookie", jar); const res = await handle(new Request(ORIGIN + url, { ...init, headers: h }), env, p, { mail: async (_t, _x, d) => { toks.push(d.token); }, ...(payments ? { payments } : {}) }); const sc = res.headers.get("set-cookie"); if (sc) jar = sc.split(";")[0]!.endsWith("=") ? "" : sc.split(";")[0]!; return res; } }); };
+    const staff = mk(); const admin = staff.admin(PORTAL);
+    await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await staff.verifyEmail(toks.at(-1)!); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
+    const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 5, published: true });
+    const order = async (c = mk(), key = `k${Math.random()}`) => (await c.checkout({ lines: [{ variantId: `${prod.data!.id}::CAP`, qty: 1 }], currency: "GHS", region: "Greater Accra", zoneId: "z", guestEmail: "g@x.com", address: { recipient: "R", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: key, acceptedTerms: true })).data!;
+    return { p, mk, order, call, admin };
+  }
+  const fake = (log: { init?: unknown }): PaymentProvider => ({ name: "fakepay", initialize: async (i) => { log.init = i; return { ok: true, redirectUrl: "https://pay.example/session" }; }, parseWebhook: async (raw, h) => (h.get("x-sig") === "good" ? JSON.parse(raw) : null) });
+
+  test("without a provider checkout says so honestly and payment can't start", async () => {
+    const { mk, order } = await shop(); const c = mk(); const o = await order(c);
+    expect(o.paymentAvailable).toBe(false); expect((await c.paymentConfig()).data).toEqual({ enabled: false });
+    const r = await c.startPayment(o.order.ref, o.trackingSecret); expect(r.status).toBe(503); expect(r.errors[0]).toMatch(/contact you/);
+  });
+  test("payment starts with the amount from OUR order, only for its owner, once; webhook pays it exactly once", async () => {
+    const log: { init?: any } = {}; const { mk, order, call, admin, p } = await shop(fake(log));
+    const c = mk(); const o = await order(c); expect(o.paymentAvailable).toBe(true);
+    expect((await mk().startPayment(o.order.ref, "wrong")).status).toBe(404); expect((await mk().startPayment("DDT-NOPE", "x")).status).toBe(404);
+    const started = await c.startPayment(o.order.ref, o.trackingSecret); expect(started.data).toEqual({ redirectUrl: "https://pay.example/session" });
+    expect(log.init).toMatchObject({ orderRef: o.order.ref, amount: o.order.total, currency: "GHS", email: "g@x.com", callbackUrl: `${ORIGIN}/track?ref=${o.order.ref}` });
+    const ev = JSON.stringify({ eventId: "e1", orderRef: o.order.ref, amount: o.order.total, currency: "GHS", status: "success" });
+    expect((await call("/api/webhooks/fakepay", { method: "POST", body: ev }, { "x-sig": "bad" })).status).toBe(401);
+    expect(await (await call("/api/webhooks/fakepay", { method: "POST", body: ev }, { "x-sig": "good" })).json()).toEqual({ received: true, result: "applied" });
+    expect(await (await call("/api/webhooks/fakepay", { method: "POST", body: ev }, { "x-sig": "good" })).json()).toMatchObject({ result: "duplicate" });
+    expect((await admin.orders()).data![0]!.status).toBe("payment_confirmed");
+    expect((await c.startPayment(o.order.ref, o.trackingSecret)).status).toBe(409); // already paid
+    // a wrong amount is sent to review, never marked paid
+    const o2 = await order(mk()); const bad = JSON.stringify({ eventId: "e2", orderRef: o2.order.ref, amount: 1, currency: "GHS", status: "success" });
+    expect(await (await call("/api/webhooks/fakepay", { method: "POST", body: bad }, { "x-sig": "good" })).json()).toMatchObject({ result: "review" });
+    // expired reservation can't start
+    const o3 = await order(mk()); await transact(p, (db) => { for (const x of db.orders.values()) if (x.ref === o3.order.ref) x.reservedUntil = 1; });
+    expect((await mk().startPayment(o3.order.ref, o3.trackingSecret)).errors[0]).toMatch(/expired/);
+  });
+  test("a signed-in customer can pay their own order without a code, but not someone else's", async () => {
+    const { mk } = await shop(fake({}));
+    const signUp = async (email: string) => { const c = mk(); await c.register({ email, password: PW, firstName: "A", lastName: "B", acceptTerms: true }); await c.login(email, PW); return c; };
+    const alice = await signUp("alice@x.com"), bob = await signUp("bob@x.com");
+    const mine = (await alice.checkout({ lines: [{ variantId: (await alice.products()).data![0]!.variantId, qty: 1 }], currency: "GHS", region: "Greater Accra", zoneId: "z", address: { recipient: "A", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: "alice-1", acceptedTerms: true })).data!;
+    expect((await alice.startPayment(mine.order.ref)).ok).toBe(true); // owner, no tracking code needed
+    expect((await bob.startPayment(mine.order.ref)).status).toBe(404); // someone else's order looks like it doesn't exist
+    expect((await mk().startPayment(mine.order.ref)).status).toBe(404); // anonymous
+  });
+  test("Paystack adapter: request shape, https-only redirect, signature check, event mapping", async () => {
+    let sent: { url: string; body: any; auth: string } | undefined;
+    const ok = paystack("sk_test_x", async (url, init) => { sent = { url, body: JSON.parse(init.body as string), auth: (init.headers as Record<string, string>)["Authorization"]! }; return new Response(JSON.stringify({ status: true, data: { authorization_url: "https://checkout.paystack.com/abc" } }), { status: 200 }); });
+    const r = await ok.initialize({ orderRef: "DDT-1", amount: 52000, currency: "GHS", email: "a@b.co", callbackUrl: "https://shop.test/track?ref=DDT-1" });
+    expect(r).toEqual({ ok: true, redirectUrl: "https://checkout.paystack.com/abc" });
+    expect(sent!.url).toBe("https://api.paystack.co/transaction/initialize"); expect(sent!.auth).toBe("Bearer sk_test_x");
+    expect(sent!.body).toMatchObject({ amount: 52000, currency: "GHS", email: "a@b.co" }); expect(sent!.body.reference).toMatch(/^DDT-1\.[a-f0-9]{8}$/);
+    expect((await paystack("k", async () => new Response(JSON.stringify({ status: true, data: { authorization_url: "http://evil.test" } }))).initialize({ orderRef: "D", amount: 1, currency: "GHS", email: "a@b.co", callbackUrl: "x" })).ok).toBe(false);
+    expect((await paystack("k", async () => { throw new Error("x"); }).initialize({ orderRef: "D", amount: 1, currency: "GHS", email: "a@b.co", callbackUrl: "x" })).ok).toBe(false);
+    const raw = JSON.stringify({ event: "charge.success", data: { id: 99, reference: "DDT-1.abcd1234", amount: 52000, currency: "GHS", status: "success" } });
+    const sig = await hmacHex("sk_test_x", raw, "SHA-512");
+    expect(await ok.parseWebhook(raw, new Headers({ "x-paystack-signature": sig }))).toEqual({ eventId: "paystack:99", orderRef: "DDT-1", amount: 52000, currency: "GHS", status: "success" });
+    expect(await ok.parseWebhook(raw, new Headers({ "x-paystack-signature": "00" }))).toBeNull(); expect(await ok.parseWebhook(raw, new Headers())).toBeNull();
+    const other = JSON.stringify({ event: "transfer.success", data: {} });
+    expect(await ok.parseWebhook(other, new Headers({ "x-paystack-signature": await hmacHex("sk_test_x", other, "SHA-512") }))).toBe("ignored");
+  });
+});

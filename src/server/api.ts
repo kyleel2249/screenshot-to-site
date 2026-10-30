@@ -20,21 +20,24 @@ import { addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, u
 import { adminStoreFor, authenticate, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
 import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
 import { getPage, listPages, resetPage, savePage } from "./services/content";
+import { providerFromEnv, type PaymentProvider } from "../lib/payments/provider";
 import { listQuotes, lookupQuote, requestQuote, respondToQuote, sendQuote } from "./services/quotes";
 import { confirmMfaSetup, mfaState, resetStaffMfa, startMfaSetup, verifyMfa } from "./services/mfa";
 import { acceptInvite, inviteStaff, listStaff, setStaffActive, setStaffRoles } from "./services/staff";
 import { listTickets, myTickets, openTicket, setTicketStatus, staffReply } from "./services/support";
 import { adjustStock, categoryAdmin, createProduct, setAvailability, setPrices, setPublishedState, ValidationError } from "./services/catalog-admin";
-import { completeRefund, getOrderForCustomer, handleVerifiedPayment, listOrdersForCustomer, placeOrder, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "./services/orders";
+import { completeRefund, getOrderForCustomer, handleVerifiedPayment, listOrdersForCustomer, orderForPayment, placeOrder, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "./services/orders";
 import type { OrderStatus } from "../lib/domain/commerce";
 import type { Availability } from "../lib/domain/status";
 
 export interface Env {
   SESSION_SECRET: string; SITE_ORIGIN: string; ADMIN_BOOTSTRAP_REF_HASH?: string; ADMIN_PORTAL_PATH?: string;
-  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PBKDF2_ITERATIONS?: string;
+  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; PBKDF2_ITERATIONS?: string;
 }
 export type NoticeTemplate = "order_received" | "quote_ready" | "ticket_reply";
 export interface Deps {
+  /** Payment provider; defaults to the one configured by PAYMENT_PROVIDER / PAYMENT_SECRET_KEY. Injectable for tests. */
+  payments?: PaymentProvider;
   /** Informational notices. Carry a reference and a subject line only — never tokens, secrets or message bodies. */
   notify?: (to: string, template: NoticeTemplate, data: { ref: string; subject?: string }) => Promise<void>;
   /** Outbound email. Tokens are only ever delivered here, never returned in an HTTP response. */
@@ -98,13 +101,23 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
   try {
     if (!limiters.general.check(`${ip}`).allowed) return json({ error: "Too many requests" }, 429);
 
-    const isWebhook = path === "/api/webhooks/payments";
+    const provider = deps.payments ?? providerFromEnv(env);
+    const isWebhook = path === "/api/webhooks/payments" || (!!provider && path === `/api/webhooks/${provider.name}`);
     if (!["GET", "HEAD"].includes(req.method) && !isWebhook) {
       const origin = req.headers.get("origin");
       if (origin !== env.SITE_ORIGIN) return json({ error: "Forbidden" }, 403); // CSRF: same-origin only
     }
 
     /* ---------- payment webhook: raw body + HMAC, no cookies involved ---------- */
+    if (isWebhook && req.method === "POST" && provider && path === `/api/webhooks/${provider.name}`) {
+      // Provider webhook: authenticity is the provider's signature over the RAW body; amounts are re-checked against our own order.
+      const raw = await req.text();
+      const ev = await provider.parseWebhook(raw, req.headers);
+      if (ev === null) return json({ error: "Invalid signature" }, 401);
+      if (ev === "ignored") return json({ received: true, result: "ignored" });
+      const r = await transact(p, (db) => handleVerifiedPayment(db, ev));
+      return json({ received: true, result: r.kind });
+    }
     if (isWebhook && req.method === "POST") {
       const raw = await req.text();
       if (!(await verifyWebhook({ secret: env.PAYMENT_WEBHOOK_SECRET, rawBody: raw, signature: req.headers.get("x-signature") }))) return json({ error: "Invalid signature" }, 401);
@@ -301,6 +314,18 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       return r.ok ? json({ ok: true }) : json({ errors: r.errors }, 400);
     }
 
+    if (path === "/api/payments/config" && req.method === "GET") return json({ enabled: !!provider, ...(provider ? { provider: provider.name } : {}) });
+    if (path === "/api/payments/start" && req.method === "POST") {
+      if (!limiters.auth.check(`pay:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      if (!provider) return json({ errors: ["Online payment isn't available yet. The business will contact you to arrange payment."] }, 503);
+      const { actor } = await who();
+      const found = await transact(p, (db) => orderForPayment(db, actor, str(body, "orderRef"), str(body, "trackingSecret")));
+      if (!found) return notFound();
+      if ("error" in found) return json({ errors: [found.error] }, 409);
+      // Amount and currency come from OUR stored order — never from the request.
+      const init = await provider.initialize({ orderRef: found.order.ref, amount: found.order.total, currency: found.order.currency, email: found.email, callbackUrl: `${env.SITE_ORIGIN.replace(/\/+$/, "")}/track?ref=${encodeURIComponent(found.order.ref)}` });
+      return init.ok ? json({ redirectUrl: init.redirectUrl }) : json({ errors: [init.error] }, 502);
+    }
     if (path === "/api/checkout" && req.method === "POST") {
       const { actor } = await who();
       const cur = str(body, "currency"); if (cur !== "GHS" && cur !== "USD") return json({ error: "Unsupported currency" }, 422);
@@ -315,7 +340,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       }));
       if (!r.ok) return json({ errors: r.errors }, 422);
       if (!r.duplicate) { const to = await transact(p, (db) => (r.order.guestEmail ?? (r.order.userId ? db.users.get(r.order.userId)?.email : undefined))); if (to) await deps.notify?.(to, "order_received", { ref: r.order.ref }); }
-      return json({ order: orderView(r.order), ...(r.trackingSecret ? { trackingSecret: r.trackingSecret } : {}), paymentRequired: true }, r.duplicate ? 200 : 201);
+      return json({ order: orderView(r.order), ...(r.trackingSecret ? { trackingSecret: r.trackingSecret } : {}), paymentRequired: true, paymentAvailable: !!provider }, r.duplicate ? 200 : 201);
     }
     if (path === "/api/track" && req.method === "GET") {
       if (!limiters.auth.check(`track:${ip}`).allowed) return json({ error: "Too many requests" }, 429);

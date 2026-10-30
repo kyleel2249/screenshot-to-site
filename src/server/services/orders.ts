@@ -144,3 +144,15 @@ export function completeRefund(db: MemoryDb, orderId: string, amount: number, no
   setStatus(o, o.refunded >= o.total ? "refunded" : "partially_refunded", undefined, "Refund completed", now);
   db.log("refund.completed", { orderId, amount }); 
 }
+
+/** Who may start a payment for an order: its signed-in owner, or a guest holding the one-time tracking code. Same answer for "no such order" and "not yours". */
+export async function orderForPayment(db: MemoryDb, actor: Actor | null, ref: string, secret: string, now = Date.now()): Promise<{ order: OrderRow; email: string } | { error: string } | null> {
+  const o = [...db.orders.values()].find((x) => x.ref === ref.trim().toUpperCase());
+  if (!o) return null;
+  const owner = !!actor && actor.kind === "customer" && o.userId === actor.id;
+  if (!owner && !(secret && timingSafeEqual(await sha256Hex(secret), o.trackingSecretHash))) return null;
+  if (o.status !== "pending_payment") return { error: "This order isn't waiting for payment." };
+  if (o.reservedUntil <= now) return { error: "The payment window for this order has expired. Please place a new order." };
+  const email = o.guestEmail ?? (o.userId ? db.users.get(o.userId)?.email : undefined);
+  return email ? { order: o, email } : { error: "This order has no email address for the payment receipt." };
+}

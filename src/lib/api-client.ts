@@ -64,7 +64,9 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     exportData: () => get<unknown>("/api/account/export"),
     deleteAccount: () => post<{ ok: true }>("/api/account/delete"),
     checkout: (b: { lines: { variantId: string; qty: number }[]; currency: Currency; region: string; zoneId: string; guestEmail?: string; address: { recipient: string; region: string; city: string; street: string; phone?: string }; discountCode?: string; idempotencyKey: string; acceptedTerms: boolean; preorderAcknowledged?: boolean }) =>
-      post<{ order: ApiOrder; trackingSecret?: string; paymentRequired: boolean }>("/api/checkout", b),
+      post<{ order: ApiOrder; trackingSecret?: string; paymentRequired: boolean; paymentAvailable: boolean }>("/api/checkout", b),
+    paymentConfig: () => get<{ enabled: boolean; provider?: string }>("/api/payments/config"),
+    startPayment: (orderRef: string, trackingSecret?: string) => post<{ redirectUrl: string }>("/api/payments/start", { orderRef, ...(trackingSecret ? { trackingSecret } : {}) }),
     track: (ref: string, secret: string) => get<{ ref: string; status: string; history: { to: string; at: number }[]; hasPreorder: boolean }>(`/api/track?ref=${encodeURIComponent(ref)}&secret=${encodeURIComponent(secret)}`),
     admin: (portal: string) => ({
       enrol: (b: { reference: string; email: string; password: string }) => post<{ ok: true }>(`${portal}/api/enrol`, b),

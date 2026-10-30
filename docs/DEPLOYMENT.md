@@ -24,6 +24,8 @@ wrangler secret put ADMIN_PORTAL_PATH      # >=12 chars, [a-z0-9-], must not con
 wrangler secret put SESSION_SECRET         # 32+ random bytes
 wrangler secret put EMAIL_API_KEY          # optional until you choose a provider (Resend adapter built in)
 wrangler secret put EMAIL_FROM
+wrangler secret put PAYMENT_PROVIDER        # "paystack"
+wrangler secret put PAYMENT_SECRET_KEY      # provider secret key (sk_live_… only after going live)
 wrangler secret put PAYMENT_WEBHOOK_SECRET
 ```
 `SITE_ORIGIN` (e.g. `https://deradarkotrade.com`) is a plain variable; it is the only origin allowed to make state-changing calls.
@@ -59,3 +61,10 @@ Without those bindings (plain `vite dev`) pages still render and `/api/*` return
 
 ## Two-step verification recovery (owner)
 Every staff account must use an authenticator app. If the owner loses both the phone and the recovery codes, an operator with D1 access clears the owner's `mfa` field in the stored state (the `users` entry for the owner), after which the next sign-in forces a fresh setup. Other staff are reset by the owner from Dashboard → Staff → Reset 2-step. Keep the owner's recovery codes offline.
+
+
+## Going live with Paystack
+1. In the Paystack dashboard set the webhook URL to `https://<your-site>/api/webhooks/paystack` (events: `charge.success`). Paystack signs with your secret key; the Worker verifies HMAC-SHA512 over the raw body.
+2. Start with a **test** key, place an order, press Pay now, complete a test payment, and confirm the order becomes *Payment confirmed* in the dashboard. Only then switch to live keys.
+3. The adapter has never run against the real service; treat the first test payments as part of acceptance testing. Mismatched amounts or currencies are held as *Payment under review* — never marked paid.
+4. USD charging requires USD to be enabled on your Paystack account; GHS is the default.

@@ -15,7 +15,7 @@ export const Route = createFileRoute("/checkout")({
 });
 
 type Zone = { id: string; name: string; regions: string[]; currency: "GHS" | "USD"; baseFee: number; estimate: string };
-type Placed = { order: ApiOrder; trackingSecret?: string };
+type Placed = { order: ApiOrder; trackingSecret?: string; paymentAvailable: boolean };
 
 function Checkout() {
   const { lines, clear } = useCart();
@@ -29,7 +29,7 @@ function Checkout() {
   const [zoneId, setZoneId] = useState(""); const [region, setRegion] = useState("");
   const [f, setF] = useState({ email: "", recipient: "", phone: "", city: "", street: "", code: "" });
   const [terms, setTerms] = useState(false); const [pre, setPre] = useState(false);
-  const [errors, setErrors] = useState<string[]>([]); const [busy, setBusy] = useState(false); const [placed, setPlaced] = useState<Placed | null>(null);
+  const [errors, setErrors] = useState<string[]>([]); const [payErrors, setPayErrors] = useState<string[]>([]); const [paying, setPaying] = useState(false); const [busy, setBusy] = useState(false); const [placed, setPlaced] = useState<Placed | null>(null);
 
   useEffect(() => { void api.zones().then((r) => setZones(r.ok ? r.data : [])); void api.me().then((r) => setSignedIn(r.ok)); }, []);
   const zone = zones?.find((z) => z.id === zoneId);
@@ -46,7 +46,7 @@ function Checkout() {
       ...(f.code.trim() ? { discountCode: f.code.trim() } : {}), idempotencyKey: key.current, acceptedTerms: terms, preorderAcknowledged: pre,
     });
     setBusy(false);
-    if (r.ok && r.data) { setPlaced({ order: r.data.order, ...(r.data.trackingSecret ? { trackingSecret: r.data.trackingSecret } : {}) }); clear(); } else setErrors(r.errors);
+    if (r.ok && r.data) { setPlaced({ order: r.data.order, paymentAvailable: r.data.paymentAvailable, ...(r.data.trackingSecret ? { trackingSecret: r.data.trackingSecret } : {}) }); clear(); } else setErrors(r.errors);
   }
 
   if (placed) {
@@ -55,8 +55,13 @@ function Checkout() {
       <Page title="Order received">
         <Notice>
           <p>Your order <strong>{o.ref}</strong> is reserved. Total: <strong>{formatMoney({ amount: o.total, currency: o.currency })}</strong>.</p>
-          <p className="mt-2">Online payment is not connected yet, so the business will contact you to arrange payment. Reserved items are held for a limited time.</p>
+          <p className="mt-2">{placed.paymentAvailable ? "Your items are reserved for a limited time. Complete payment to confirm your order." : "Online payment is not available yet, so the business will contact you to arrange payment. Reserved items are held for a limited time."}</p>
         </Notice>
+        {placed.paymentAvailable && (
+          <div className="space-y-2"><Errors errors={payErrors} />
+            <button className="btn-primary w-full" disabled={paying} onClick={() => { setPaying(true); setPayErrors([]); void api.startPayment(o.ref, placed.trackingSecret).then((r) => { if (r.ok && r.data) window.location.assign(r.data.redirectUrl); else { setPaying(false); setPayErrors(r.errors); } }); }}>{paying ? "Redirecting to payment…" : `Pay ${formatMoney({ amount: o.total, currency: o.currency })} now`}</button>
+            <p className="text-xs text-muted-foreground">You'll be taken to our payment partner's secure page. We never see or store your card or Mobile Money PIN.</p></div>
+        )}
         {placed.trackingSecret && (
           <div className="rounded-md border border-border p-4 text-sm">
             <p className="font-semibold">Save your tracking code — it is shown only once.</p>
