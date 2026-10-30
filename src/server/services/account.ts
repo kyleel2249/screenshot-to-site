@@ -66,12 +66,33 @@ export function setWishlist(db: MemoryDb, actor: Actor | null, productId: string
   return set.size;
 }
 
+export const CART_MAX_LINES = 50, CART_MAX_QTY = 99;
+export const getCart = (db: MemoryDb, actor: Actor | null) => (db.carts.get(own(actor).id)?.lines ?? []).map((l) => ({ ...l }));
+/**
+ * Replaces the signed-in customer's saved cart. Only variant ids and quantities are stored — never prices. Lines whose product is no
+ * longer publicly available are dropped, duplicates are merged, quantities are clamped; the cleaned cart is returned so the browser can show it.
+ */
+export function saveCart(db: MemoryDb, actor: Actor | null, raw: unknown, available: ReadonlySet<string>, now = Date.now()) {
+  const me = own(actor);
+  if (!Array.isArray(raw) || raw.length > CART_MAX_LINES * 2) throw new ValidationError(["The cart is invalid or too large."]);
+  const merged = new Map<string, number>();
+  for (const l of raw) {
+    const o = (l && typeof l === "object" ? l : {}) as Record<string, unknown>;
+    const id = typeof o["variantId"] === "string" ? o["variantId"] : "", qty = o["qty"];
+    if (!id || !available.has(id) || typeof qty !== "number" || !Number.isInteger(qty) || qty < 1) continue;
+    merged.set(id, Math.min(CART_MAX_QTY, (merged.get(id) ?? 0) + qty));
+  }
+  const lines = [...merged].slice(0, CART_MAX_LINES).map(([variantId, qty]) => ({ variantId, qty }));
+  if (lines.length) db.carts.set(me.id, { lines, updatedAt: now }); else db.carts.delete(me.id);
+  return lines;
+}
+
 /** Self-service data export: the customer's own data only, never credentials. */
 export function exportMyData(db: MemoryDb, actor: Actor | null) {
   const me = own(actor);
   db.privacy.set(db.nextId("prv"), { id: "", userId: me.id, kind: "export", status: "done", at: Date.now() });
   db.log("privacy.export", { userId: me.id });
-  return { profile: getProfile(db, me), addresses: listAddresses(db, me), wishlist: [...(db.wishlist.get(me.id) ?? [])], consents: db.consents.filter((c) => c.userId === me.id),
+  return { profile: getProfile(db, me), addresses: listAddresses(db, me), wishlist: [...(db.wishlist.get(me.id) ?? [])], cart: getCart(db, me), consents: db.consents.filter((c) => c.userId === me.id),
     reviews: [...db.reviews.values()].filter((r) => r.userId === me.id).map((r) => ({ product: db.products.get(r.productId)?.name ?? "", rating: r.rating, title: r.title, body: r.body, status: r.status })),
     orders: [...db.orders.values()].filter((o) => o.userId === me.id).map((o) => ({ ref: o.ref, status: o.status, currency: o.currency, total: o.total, items: o.items.map((i) => ({ name: i.name, qty: i.qty, line: i.line })) })) };
 }
@@ -85,7 +106,7 @@ export function deleteMyAccount(db: MemoryDb, actor: Actor | null) {
   for (const [id, r] of db.reviews) if (r.userId === me.id) db.reviews.delete(id); // reviews are personal content: erased with the account
   for (const o of db.orders.values()) if (o.userId === me.id) { delete o.userId; delete o.guestEmail; o.address = { recipient: "Deleted customer", region: o.address.region, city: "", street: "" }; }
   for (const [k, a] of db.addresses) if (a.userId === me.id) db.addresses.delete(k);
-  db.profiles.delete(me.id); db.wishlist.delete(me.id);
+  db.profiles.delete(me.id); db.wishlist.delete(me.id); db.carts.delete(me.id);
   revokeAllSessions(db, me.id);
   u.email = `deleted+${me.id}@invalid`; u.passwordHash = "!"; u.status = "deleted"; u.emailVerified = false;
   db.log("privacy.account_deleted", { userId: me.id });

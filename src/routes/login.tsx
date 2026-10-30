@@ -1,3 +1,4 @@
+import { useCart } from "@/lib/cart";
 import { resetWishlist } from "@/lib/wishlist";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -13,11 +14,12 @@ function Login() {
   const nav = useNavigate();
   const [email, setEmail] = useState(""); const [pw, setPw] = useState("");
   const [errors, setErrors] = useState<string[]>([]); const [busy, setBusy] = useState(false);
+  const { afterLogin } = useCart();
   async function submit(e: React.FormEvent) {
     e.preventDefault(); setBusy(true); setErrors([]);
     const r = await api.login(email.trim(), pw);
     setBusy(false);
-    if (r.ok) { setPw(""); resetWishlist(); void nav({ to: "/account" }); } else setErrors(r.errors);
+    if (r.ok) { setPw(""); resetWishlist(); void afterLogin().then(() => nav({ to: "/account" })); } else setErrors(r.errors);
   }
   return (
     <Page title="Sign in">

@@ -4,7 +4,7 @@ import { ProductCard } from "@/components/ProductCard";
 import { useCatalog } from "@/lib/catalog-store";
 import type { StoreProduct } from "@/lib/storefront";
 
-export function Collection({ title, intro, items, empty, children }: { title: string; intro?: string; items: StoreProduct[]; empty?: string; children?: ReactNode }) {
+export function Collection({ title, intro, items, empty, children }: { title: string; intro?: string | undefined; items: StoreProduct[]; empty?: string; children?: ReactNode }) {
   const { status, reload } = useCatalog();
   return (
     <div className="container-x py-12">
@@ -38,7 +38,7 @@ export function Collection({ title, intro, items, empty, children }: { title: st
 }
 
 /** A collection page whose items are picked from the live catalogue. */
-export function CatalogCollection({ title, intro, pick, empty }: { title: string; intro?: string; pick: (all: StoreProduct[]) => StoreProduct[]; empty?: string }) {
+export function CatalogCollection({ title, intro, pick, empty }: { title: string; intro?: string | undefined; pick: (all: StoreProduct[]) => StoreProduct[]; empty?: string }) {
   const { products } = useCatalog();
   return <Collection title={title} {...(intro ? { intro } : {})} items={pick(products)} {...(empty ? { empty } : {})} />;
 }

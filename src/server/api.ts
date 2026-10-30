@@ -16,7 +16,7 @@ import { resolvePortalPath } from "../lib/security/enrolment";
 import type { MemoryDb } from "./db";
 import { Forbidden, requirePermission, type Actor } from "./rbac";
 import { ConflictError, transact, type Persistence } from "./persistence/transact";
-import { setWishlist, addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
+import { getCart, saveCart, setWishlist, addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
 import { adminStoreFor, authenticate, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
 import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
 import { createPurchaseOrder, listPurchaseOrders, listSuppliers, receivePurchaseOrder, saveSupplier, setPurchaseOrderStatus } from "./services/purchasing";
@@ -422,6 +422,8 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         if (path === "/api/account/profile" && req.method === "POST") { await transact(p, (db) => updateProfile(db, actor, body as never)); return json({ ok: true }); }
         if (path === "/api/account/addresses" && req.method === "GET") return json(await transact(p, (db) => listAddresses(db, actor)));
         if (path === "/api/account/addresses" && req.method === "POST") return json(await transact(p, (db) => addAddress(db, actor, body as never)), 201);
+        if (path === "/api/account/cart" && req.method === "GET") return json(await transact(p, (db) => { const ok = new Set(publicProducts(db).map((x) => x.variantId)); return getCart(db, actor).filter((l) => ok.has(l.variantId)); }));
+        if (path === "/api/account/cart" && req.method === "PUT") return json(await transact(p, (db) => saveCart(db, actor, body["lines"], new Set(publicProducts(db).map((x) => x.variantId)))));
         if (path === "/api/account/wishlist" && req.method === "GET") {
           return json(await transact(p, (db) => { const saved = db.wishlist.get(actor.id) ?? new Set<string>(); return publicProducts(db).filter((x) => { const row = [...db.products.values()].find((pr) => pr.slug === x.slug); return !!row && saved.has(row.id); }).map((x) => x.slug); }));
         }

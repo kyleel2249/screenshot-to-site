@@ -1,3 +1,4 @@
+import { useCart } from "@/lib/cart";
 import { WishlistButton } from "@/components/WishlistButton";
 import { useCatalog } from "@/lib/catalog-store";
 import { resetWishlist, useWishlist } from "@/lib/wishlist";
@@ -19,7 +20,7 @@ type Address = { id: string; recipient: string; region: string; city: string; st
 
 function Account() {
   const nav = useNavigate();
-  const { products } = useCatalog(); const { slugs: saved } = useWishlist();
+  const { afterLogout } = useCart(); const { products } = useCatalog(); const { slugs: saved } = useWishlist();
   const [me, setMe] = useState<Profile | null | undefined>(undefined);
   const [orders, setOrders] = useState<ApiOrder[]>([]); const [addrs, setAddrs] = useState<Address[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -46,7 +47,7 @@ function Account() {
   }
   async function remove() {
     if (!window.confirm("Permanently delete your account? Order records the law requires us to keep are anonymised, not erased. This cannot be undone.")) return;
-    const r = await api.deleteAccount(); if (r.ok) void nav({ to: "/" }); else setErrors(r.errors);
+    const r = await api.deleteAccount(); if (r.ok) { resetWishlist(); afterLogout(); void nav({ to: "/" }); } else setErrors(r.errors);
   }
 
   if (me === undefined) return <Page title="My account"><Notice>Loading…</Notice></Page>;
@@ -100,7 +101,7 @@ function Account() {
       </section>
       <section className="flex flex-wrap gap-3 border-t border-border pt-6" aria-label="Privacy and session">
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void download()}>Download my data</button>
-        <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => { resetWishlist(); void nav({ to: "/" }); })}>Sign out</button>
+        <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => { resetWishlist(); afterLogout(); void nav({ to: "/" }); })}>Sign out</button>
         <button className="rounded-full border border-destructive px-4 py-2 text-sm text-destructive" onClick={() => void remove()}>Delete my account</button>
       </section>
     </Page>

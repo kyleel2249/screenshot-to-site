@@ -765,3 +765,31 @@ describe("category filter attributes", () => {
     expect((await mk().admin(PORTAL).setAttributes(car.id, {})).status).toBe(404);
   });
 });
+
+import { mergeCarts, sameCart } from "../lib/cart-core";
+describe("saved cart for signed-in customers", () => {
+  test("pure merge keeps the larger quantity (never doubles) and caps at 99", () => {
+    expect(mergeCarts([{ variantId: "a", qty: 2 }, { variantId: "c", qty: 1 }], [{ variantId: "a", qty: 3 }, { variantId: "b", qty: 1 }]).sort((x, y) => x.variantId.localeCompare(y.variantId))).toEqual([{ variantId: "a", qty: 3 }, { variantId: "b", qty: 1 }, { variantId: "c", qty: 1 }]);
+    expect(mergeCarts([{ variantId: "a", qty: 500 }], [])).toEqual([{ variantId: "a", qty: 99 }]);
+    const once = mergeCarts([{ variantId: "a", qty: 2 }], [{ variantId: "a", qty: 2 }]); expect(sameCart(once, mergeCarts(once, once))).toBe(true);
+  });
+  test("customers save and read their cart; unavailable items are dropped, duplicates merged, quantities clamped; private; erased with the account", async () => {
+    const { mk, admin } = await shop();
+    const a = (await admin.createProduct({ name: "A", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "A1", priceGhs: 1000, onHand: 5, published: true })).data!;
+    const hidden = (await admin.createProduct({ name: "H", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "H1", priceGhs: 1000, onHand: 5, published: false })).data!;
+    const va = `${a.id}::A1`, vh = `${hidden.id}::H1`;
+    const signUp = async (email: string) => { const c = mk(); await c.register({ email, password: PW, firstName: "A", lastName: "B", acceptTerms: true }); await c.login(email, PW); return c; };
+    const alice = await signUp("alice@c.com"), bob = await signUp("bob@c.com");
+    expect((await mk().cart()).status).toBe(401); expect((await mk().saveCart([{ variantId: va, qty: 1 }])).status).toBe(401);
+    expect((await alice.saveCart([{ variantId: va, qty: 2 }, { variantId: va, qty: 3 }, { variantId: vh, qty: 1 }, { variantId: "ghost", qty: 1 }, { variantId: va, qty: -1 }, { variantId: va, qty: 1.5 }])).data).toEqual([{ variantId: va, qty: 5 }]);
+    expect((await alice.saveCart([{ variantId: va, qty: 1000 }])).data).toEqual([{ variantId: va, qty: 99 }]);
+    expect((await alice.cart()).data).toEqual([{ variantId: va, qty: 99 }]); expect((await bob.cart()).data).toEqual([]);
+    expect((await alice.saveCart("nope" as never)).status).toBe(422); expect((await alice.saveCart(Array.from({ length: 101 }, () => ({ variantId: va, qty: 1 })))).status).toBe(422);
+    await admin.publish(a.id, false); expect((await alice.cart()).data).toEqual([]); // no longer for sale → not offered back
+    await admin.publish(a.id, true);
+    expect((await alice.cart()).data).toEqual([{ variantId: va, qty: 99 }]);
+    expect(JSON.stringify((await alice.exportData()).data)).toContain(va);
+    expect((await alice.saveCart([])).data).toEqual([]); expect((await alice.cart()).data).toEqual([]);
+    await alice.saveCart([{ variantId: va, qty: 1 }]); expect((await alice.deleteAccount()).ok).toBe(true);
+  });
+});

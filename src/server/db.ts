@@ -62,6 +62,7 @@ export class MemoryDb {
   tickets = new Map<string, TicketRow>();
   events: EventRow[] = [];
   wishlist = new Map<string, Set<string>>(); // userId -> productIds
+  carts = new Map<string, { lines: { variantId: string; qty: number }[]; updatedAt: number }>(); // userId -> saved cart
   consents: { userId: string; kind: string; granted: boolean; policyVersion?: string; at: number }[] = [];
   /** Owner-edited pages by slug; absent = the shipped default. */
   pages: Record<string, PageContent & { updatedAt: number; updatedBy?: string }> = {};
