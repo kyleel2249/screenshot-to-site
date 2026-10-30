@@ -19,6 +19,7 @@ import { ConflictError, transact, type Persistence } from "./persistence/transac
 import { addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
 import { adminStoreFor, authenticate, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
 import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
+import { createPurchaseOrder, listPurchaseOrders, listSuppliers, receivePurchaseOrder, saveSupplier, setPurchaseOrderStatus } from "./services/purchasing";
 import { listForModeration, listPublished, moderate, submitReview, summary } from "./services/reviews";
 import { getPage, listPages, resetPage, savePage } from "./services/content";
 import { providerFromEnv, type PaymentProvider } from "../lib/payments/provider";
@@ -218,6 +219,12 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         }
         if (sub === "/staff/roles" && req.method === "POST") { await transact(p, (db) => setStaffRoles(db, actor, str(body, "userId"), body["roles"])); return json({ ok: true }); }
         if (sub === "/staff/active" && req.method === "POST") { await transact(p, (db) => setStaffActive(db, actor, str(body, "userId"), bool(body, "active"))); return json({ ok: true }); }
+        if (sub === "/suppliers" && req.method === "GET") return json(await transact(p, (db) => listSuppliers(db, actor)));
+        if (sub === "/suppliers" && req.method === "POST") return json(await transact(p, (db) => saveSupplier(db, actor, body)), 201);
+        if (sub === "/purchase-orders" && req.method === "GET") return json(await transact(p, (db) => listPurchaseOrders(db, actor)));
+        if (sub === "/purchase-orders" && req.method === "POST") { const po = await transact(p, (db) => createPurchaseOrder(db, actor, body)); return json({ id: po.id, ref: po.ref }, 201); }
+        if (sub === "/purchase-orders/status" && req.method === "POST") { await transact(p, (db) => setPurchaseOrderStatus(db, actor, str(body, "id"), body["to"])); return json({ ok: true }); }
+        if (sub === "/purchase-orders/receive" && req.method === "POST") { await transact(p, (db) => receivePurchaseOrder(db, actor, str(body, "id"), body["lines"])); return json({ ok: true }); }
         if (sub === "/reviews" && req.method === "GET") return json(await transact(p, (db) => listForModeration(db, actor)));
         if (sub === "/reviews/moderate" && req.method === "POST") { await transact(p, (db) => moderate(db, actor, str(body, "id"), body["action"])); return json({ ok: true }); }
         if (sub === "/pages" && req.method === "GET") return json(await transact(p, (db) => listPages(db, actor)));

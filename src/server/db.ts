@@ -36,6 +36,12 @@ export interface QuoteRow {
   createdAt: number;
 }
 export interface ReviewRow { id: string; productId: string; userId: string; orderId: string; rating: number; title: string; body: string; author: string; status: "pending" | "published" | "rejected"; createdAt: number }
+export interface SupplierRow { id: string; name: string; contact: string; email: string; phone: string; country: string; notes: string; active: boolean }
+export interface PurchaseOrderRow {
+  id: string; ref: string; supplierId: string; status: "draft" | "ordered" | "partially_received" | "received" | "cancelled"; currency: string;
+  lines: { variantId: string; name: string; qty: number; unitCost: number; received: number }[]; expectedAt?: string; notes: string; createdAt: number;
+  receipts: { at: number; by: string; lines: { variantId: string; qty: number }[] }[];
+}
 export interface PrivacyRequest { id: string; userId: string; kind: "export" | "deletion" | "correction"; status: "open" | "done"; at: number }
 export interface AuditRow { id: number; actor?: string; event: string; detail: Record<string, string | number | boolean>; at: number }
 
@@ -59,6 +65,8 @@ export class MemoryDb {
   /** Owner-edited pages by slug; absent = the shipped default. */
   pages: Record<string, PageContent & { updatedAt: number; updatedBy?: string }> = {};
   reviews = new Map<string, ReviewRow>();
+  suppliers = new Map<string, SupplierRow>();
+  purchaseOrders = new Map<string, PurchaseOrderRow>();
   quotes = new Map<string, QuoteRow>();
   privacy = new Map<string, PrivacyRequest>();
   tokens = new Map<string, { userId: string; kind: "verify" | "reset" | "invite"; expiresAt: number }>();

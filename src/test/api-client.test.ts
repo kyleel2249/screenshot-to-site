@@ -521,3 +521,44 @@ describe("verified-buyer reviews", () => {
     expect(await transact(p, (db) => db.reviews.size)).toBe(0);
   });
 });
+
+describe("suppliers and purchase orders", () => {
+  test("create → order → receive in parts adds audited stock, never over-receives, all-or-nothing, role-gated, costs never public", async () => {
+    const { admin, shopper, staff, p } = await ownerSession();
+    const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 2, published: true });
+    const prod2 = await admin.createProduct({ name: "Belt", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "BELT", priceGhs: 5000, onHand: 0, published: true });
+    const v1 = `${prod.data!.id}::CAP`, v2 = `${prod2.data!.id}::BELT`;
+    expect((await admin.saveSupplier({ name: "", email: "bad" })).status).toBe(422);
+    const sup = (await admin.saveSupplier({ name: "Guangzhou Gear", country: "China", email: "sales@gz.example" })).data!;
+    expect((await admin.saveSupplier({ id: sup.id, name: "Guangzhou Gear Ltd", active: true })).data!.name).toBe("Guangzhou Gear Ltd");
+    expect((await admin.saveSupplier({ id: "nope", name: "x" })).status).toBe(422);
+    const bad = await admin.createPurchaseOrder({ supplierId: "nope", currency: "dollars", lines: [{ variantId: "x", qty: 0, unitCost: -1 }] }); expect(bad.status).toBe(422); expect(bad.errors.length).toBeGreaterThan(2);
+    expect((await admin.createPurchaseOrder({ supplierId: sup.id, currency: "USD", lines: [{ variantId: v1, qty: 5, unitCost: 300 }, { variantId: v1, qty: 1, unitCost: 300 }] })).errors.join()).toMatch(/twice/);
+    const po = (await admin.createPurchaseOrder({ supplierId: sup.id, currency: "usd", lines: [{ variantId: v1, qty: 10, unitCost: 300 }, { variantId: v2, qty: 4, unitCost: 150 }], notes: "Sea freight" })).data!;
+    expect((await admin.receivePurchaseOrder(po.id, [{ variantId: v1, qty: 1 }])).status).toBe(422); // still a draft
+    expect((await admin.setPurchaseOrderStatus(po.id, "ordered")).ok).toBe(true);
+    expect((await admin.setPurchaseOrderStatus(po.id, "ordered")).status).toBe(422);
+    // all-or-nothing: second line over-receives → nothing is added
+    expect((await admin.receivePurchaseOrder(po.id, [{ variantId: v1, qty: 6 }, { variantId: v2, qty: 9 }])).errors[0]).toMatch(/only 4 still expected/);
+    expect((await admin.products()).data!.find((x) => x.sku === "CAP")!.onHand).toBe(2);
+    expect((await admin.receivePurchaseOrder(po.id, [{ variantId: v1, qty: 6 }])).ok).toBe(true);
+    expect((await admin.products()).data!.find((x) => x.sku === "CAP")!.onHand).toBe(8);
+    expect((await admin.purchaseOrders()).data![0]).toMatchObject({ status: "partially_received", supplier: "Guangzhou Gear Ltd", currency: "USD" });
+    expect((await admin.setPurchaseOrderStatus(po.id, "cancelled")).status).toBe(422); // can't cancel after receiving
+    expect((await admin.receivePurchaseOrder(po.id, [{ variantId: v1, qty: 5 }])).status).toBe(422); // only 4 left
+    await admin.receivePurchaseOrder(po.id, [{ variantId: v1, qty: 4 }, { variantId: v2, qty: 4 }]);
+    expect((await admin.purchaseOrders()).data![0]!.status).toBe("received");
+    expect((await admin.products()).data!.find((x) => x.sku === "BELT")!.onHand).toBe(4);
+    expect(await transact(p, (db) => db.audit.filter((a) => a.event === "inventory.adjusted").length)).toBeGreaterThanOrEqual(3);
+    expect((await admin.receivePurchaseOrder(po.id, [{ variantId: v1, qty: 1 }])).status).toBe(422); // finished
+    // cancel a fresh unreceived order
+    const po2 = (await admin.createPurchaseOrder({ supplierId: sup.id, currency: "USD", lines: [{ variantId: v1, qty: 1, unitCost: 1 }] })).data!;
+    expect((await admin.setPurchaseOrderStatus(po2.id, "cancelled")).ok).toBe(true);
+    // costs never leak publicly; anonymous and fulfilment staff are refused
+    expect(JSON.stringify((await shopper().products()).data)).not.toMatch(/unitCost|Guangzhou/);
+    expect((await shopper().admin(PORTAL).suppliers()).status).toBe(404);
+    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["fulfilment"]; });
+    await staff.logout(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
+    expect((await admin.suppliers()).status).toBe(403); expect((await admin.purchaseOrders()).status).toBe(403);
+  });
+});

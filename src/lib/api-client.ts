@@ -103,6 +103,12 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
           return { ok: false, status: res.status, data: null, errors: [msg] };
         } catch { return { ok: false, status: 0, data: null, errors: ["Network error. Check your connection and try again."] }; }
       },
+      suppliers: () => get<Supplier[]>(`${portal}/api/suppliers`),
+      saveSupplier: (b: Partial<Supplier> & { name: string }) => post<Supplier>(`${portal}/api/suppliers`, b),
+      purchaseOrders: () => get<PurchaseOrder[]>(`${portal}/api/purchase-orders`),
+      createPurchaseOrder: (b: { supplierId: string; currency: string; lines: { variantId: string; qty: number; unitCost: number }[]; expectedAt?: string; notes?: string }) => post<{ id: string; ref: string }>(`${portal}/api/purchase-orders`, b),
+      setPurchaseOrderStatus: (id: string, to: "ordered" | "cancelled") => post(`${portal}/api/purchase-orders/status`, { id, to }),
+      receivePurchaseOrder: (id: string, lines: { variantId: string; qty: number }[]) => post(`${portal}/api/purchase-orders/receive`, { id, lines }),
       reviews: () => get<AdminReview[]>(`${portal}/api/reviews`),
       moderateReview: (id: string, action: "publish" | "reject") => post(`${portal}/api/reviews/moderate`, { id, action }),
       pages: () => get<(PageContent & { customised: boolean; legal: boolean; updatedAt: number | null })[]>(`${portal}/api/pages`),
@@ -133,6 +139,8 @@ export interface QuoteView { ref: string; status: "new" | "quoted" | "accepted" 
 export interface AdminQuote { id: string; ref: string; business: string; contactName: string; email: string; phone: string | null; region: string; notes: string; items: { description: string; qty: number }[]; status: QuoteView["status"]; quote: (QuoteView["quote"] & { quotedAt: number }) | null; createdAt: number }
 export interface ReviewList { summary: { count: number; average: number }; reviews: { rating: number; title: string; body: string; author: string; at: number }[]; canReview: boolean; myReview: { status: string } | null }
 export interface AdminReview { id: string; product: string; rating: number; title: string; body: string; author: string; status: "pending" | "published" | "rejected"; createdAt: number }
+export interface Supplier { id: string; name: string; contact: string; email: string; phone: string; country: string; notes: string; active: boolean }
+export interface PurchaseOrder { id: string; ref: string; supplierId: string; supplier: string; status: "draft" | "ordered" | "partially_received" | "received" | "cancelled"; currency: string; lines: { variantId: string; name: string; qty: number; unitCost: number; received: number }[]; expectedAt?: string; notes: string; createdAt: number; receipts: { at: number; by: string; lines: { variantId: string; qty: number }[] }[] }
 export interface StaffMember { id: string; email: string; roles: string[]; state: "active" | "invited" | "suspended"; createdAt: number }
 export interface Ticket { id: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: string; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }
 export interface Analytics { days: number; funnel: { productViews: number; addToCart: number; checkoutStarts: number; paidOrders: number }; revenue: Record<string, { gross: number; refunds: number; net: number; orders: number }> }

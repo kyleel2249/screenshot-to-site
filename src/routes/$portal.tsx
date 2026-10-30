@@ -1,7 +1,7 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone, AdminQuote, AdminReview, Analytics, StaffMember, Ticket } from "@/lib/api-client";
+import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone, AdminQuote, AdminReview, Analytics, PurchaseOrder, StaffMember, Supplier, Ticket } from "@/lib/api-client";
 import { childrenOf, topLevel, type CategoryNode } from "@/lib/domain/categories";
 import type { Section } from "@/lib/content";
 import { formatMoney } from "@/lib/domain/money";
@@ -21,7 +21,7 @@ export const Route = createFileRoute("/$portal")({
   component: Dashboard,
 });
 
-type Tab = "reviews" | "content" | "quotes" | "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
+type Tab = "purchasing" | "reviews" | "content" | "quotes" | "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
 const AVAIL = Object.keys(AVAILABILITY_LABEL) as Availability[];
 
 function Dashboard() {
@@ -47,9 +47,9 @@ function Dashboard() {
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => setState("login"))}>Sign out</button>
       </header>
       <nav className="mt-6 flex gap-2" aria-label="Sections" role="tablist">
-        {(["products", "orders", "reviews", "content", "quotes", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
+        {(["products", "orders", "purchasing", "reviews", "content", "quotes", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
       </nav>
-      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "reviews" ? <ReviewsTab admin={admin} /> : tab === "content" ? <ContentTab admin={admin} /> : tab === "quotes" ? <Quotes admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
+      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "purchasing" ? <Purchasing admin={admin} /> : tab === "reviews" ? <ReviewsTab admin={admin} /> : tab === "content" ? <ContentTab admin={admin} /> : tab === "quotes" ? <Quotes admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
     </div>
   );
 }
@@ -507,6 +507,76 @@ function ReviewsTab({ admin }: { admin: Admin }) {
           {r.title && <p className="font-medium">{r.title}</p>}<p className="whitespace-pre-line text-foreground/80">{r.body}</p>
           <div className="flex gap-3">{r.status !== "published" && <button className="underline" onClick={() => void act(r.id, "publish")}>Publish</button>}{r.status !== "rejected" && <button className="underline" onClick={() => void act(r.id, "reject")}>Reject</button>}</div>
         </li>))}{data && !data.length && <li className="py-3 text-muted-foreground">No reviews yet.</li>}</ul>
+    </div>
+  );
+}
+
+function Purchasing({ admin }: { admin: Admin }) {
+  const sup = useLoad<Supplier[]>(useCallback(() => admin.suppliers(), [admin]));
+  const pos = useLoad<PurchaseOrder[]>(useCallback(() => admin.purchaseOrders(), [admin]));
+  const prods = useLoad<AdminProduct[]>(useCallback(() => admin.products(), [admin]));
+  const [errors, setErrors] = useState<string[]>([]);
+  const [name, setName] = useState(""), [email, setEmail] = useState(""), [country, setCountry] = useState("");
+  const [supplierId, setSupplierId] = useState(""), [currency, setCurrency] = useState("USD"), [expectedAt, setExpectedAt] = useState("");
+  const [lines, setLines] = useState<{ variantId: string; qty: string; unitCost: string }[]>([{ variantId: "", qty: "", unitCost: "" }]);
+  const [recv, setRecv] = useState<Record<string, string>>({});
+  const done = async (r: { ok: boolean; errors: string[] }) => { if (r.ok) { setErrors([]); await Promise.all([sup.reload(), pos.reload(), prods.reload()]); } else setErrors(r.errors); return r.ok; };
+  const addSupplier = async () => { if (await done(await admin.saveSupplier({ name, email, country }))) { setName(""); setEmail(""); setCountry(""); } };
+  const create = async () => {
+    const parsed = lines.filter((l) => l.variantId).map((l) => ({ variantId: l.variantId, qty: Number(l.qty), unitCost: Math.round(Number(l.unitCost) * 100) }));
+    if (await done(await admin.createPurchaseOrder({ supplierId, currency, lines: parsed, ...(expectedAt ? { expectedAt } : {}) }))) setLines([{ variantId: "", qty: "", unitCost: "" }]);
+  };
+  const receive = async (po: PurchaseOrder) => {
+    const got = po.lines.map((l) => ({ variantId: l.variantId, qty: Number(recv[`${po.id}:${l.variantId}`] ?? 0) })).filter((l) => l.qty > 0);
+    if (await done(await admin.receivePurchaseOrder(po.id, got))) setRecv({});
+  };
+  const field = "rounded-md border border-input bg-background px-3 py-2 text-sm";
+  return (
+    <div className="space-y-8">
+      <Errors errors={errors} />
+      <p className="text-sm text-muted-foreground">Unit costs are entered in major units (e.g. 3.00) and are internal only — never shown to shoppers. Receiving a delivery adds the units to inventory and records them in the audit log; you can't receive more than was ordered.</p>
+      <section aria-labelledby="sup-h" className="space-y-3">
+        <h2 id="sup-h" className="text-lg font-semibold">Suppliers</h2>
+        <div className="grid gap-2 sm:grid-cols-4">
+          <input className={field} placeholder="Supplier name" aria-label="Supplier name" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className={field} placeholder="Email" aria-label="Supplier email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input className={field} placeholder="Country" aria-label="Supplier country" value={country} onChange={(e) => setCountry(e.target.value)} />
+          <button className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground" onClick={() => void addSupplier()}>Add supplier</button>
+        </div>
+        <ul className="divide-y divide-border text-sm">{sup.data?.map((s) => <li key={s.id} className="py-2">{s.name} {s.country && `· ${s.country}`} {s.email && `· ${s.email}`}</li>)}{sup.data && !sup.data.length && <li className="py-2 text-muted-foreground">No suppliers yet.</li>}</ul>
+      </section>
+      <section aria-labelledby="po-h" className="space-y-3">
+        <h2 id="po-h" className="text-lg font-semibold">New purchase order</h2>
+        <div className="grid gap-2 sm:grid-cols-3">
+          <select className={field} aria-label="Supplier" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}><option value="">Choose supplier</option>{sup.data?.filter((s) => s.active).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select>
+          <input className={field} aria-label="Currency" maxLength={3} value={currency} onChange={(e) => setCurrency(e.target.value)} />
+          <input className={field} type="date" aria-label="Expected date" value={expectedAt} onChange={(e) => setExpectedAt(e.target.value)} />
+        </div>
+        {lines.map((l, i) => (
+          <div key={i} className="grid gap-2 sm:grid-cols-3">
+            <select className={field} aria-label={`Line ${i + 1} product`} value={l.variantId} onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, variantId: e.target.value } : x))}><option value="">Choose product</option>{prods.data?.filter((p) => p.variantId).map((p) => <option key={p.id} value={p.variantId ?? ""}>{p.name} ({p.sku}) — {p.onHand} on hand</option>)}</select>
+            <input className={field} inputMode="numeric" placeholder="Quantity" aria-label={`Line ${i + 1} quantity`} value={l.qty} onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, qty: e.target.value } : x))} />
+            <input className={field} inputMode="decimal" placeholder="Unit cost" aria-label={`Line ${i + 1} unit cost`} value={l.unitCost} onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, unitCost: e.target.value } : x))} />
+          </div>))}
+        <div className="flex gap-3"><button className="underline text-sm" onClick={() => setLines([...lines, { variantId: "", qty: "", unitCost: "" }])}>Add line</button><button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground" onClick={() => void create()}>Create order</button></div>
+      </section>
+      <section aria-labelledby="pol-h" className="space-y-3">
+        <h2 id="pol-h" className="text-lg font-semibold">Purchase orders</h2>
+        <ul className="space-y-4 text-sm">{pos.data?.map((po) => (
+          <li key={po.id} className="rounded-lg border border-border p-4">
+            <p className="font-semibold">{po.ref} · {po.supplier} · {po.currency} <span className="badge-label ml-1">{po.status.replace("_", " ")}</span></p>
+            <ul className="mt-2 space-y-1">{po.lines.map((l) => (
+              <li key={l.variantId} className="flex flex-wrap items-center gap-3">
+                <span className="min-w-48">{l.name}</span><span>{l.received}/{l.qty} received</span>
+                {(po.status === "ordered" || po.status === "partially_received") && l.received < l.qty && <input className={`${field} w-24`} inputMode="numeric" aria-label={`Receive ${l.name}`} placeholder="Qty in" value={recv[`${po.id}:${l.variantId}`] ?? ""} onChange={(e) => setRecv({ ...recv, [`${po.id}:${l.variantId}`]: e.target.value })} />}
+              </li>))}</ul>
+            <div className="mt-3 flex gap-3">
+              {po.status === "draft" && <button className="underline" onClick={() => void admin.setPurchaseOrderStatus(po.id, "ordered").then(done)}>Mark ordered</button>}
+              {(po.status === "ordered" || po.status === "partially_received") && <button className="underline" onClick={() => void receive(po)}>Receive delivery</button>}
+              {(po.status === "draft" || po.status === "ordered") && po.lines.every((l) => l.received === 0) && <button className="underline" onClick={() => void admin.setPurchaseOrderStatus(po.id, "cancelled").then(done)}>Cancel</button>}
+            </div>
+          </li>))}{pos.data && !pos.data.length && <li className="text-muted-foreground">No purchase orders yet.</li>}</ul>
+      </section>
     </div>
   );
 }
