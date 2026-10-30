@@ -16,7 +16,7 @@ import { resolvePortalPath } from "../lib/security/enrolment";
 import type { MemoryDb } from "./db";
 import { Forbidden, requirePermission, type Actor } from "./rbac";
 import { ConflictError, transact, type Persistence } from "./persistence/transact";
-import { addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
+import { setWishlist, addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
 import { adminStoreFor, authenticate, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
 import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
 import { createPurchaseOrder, listPurchaseOrders, listSuppliers, receivePurchaseOrder, saveSupplier, setPurchaseOrderStatus } from "./services/purchasing";
@@ -421,6 +421,14 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         if (path === "/api/account/profile" && req.method === "POST") { await transact(p, (db) => updateProfile(db, actor, body as never)); return json({ ok: true }); }
         if (path === "/api/account/addresses" && req.method === "GET") return json(await transact(p, (db) => listAddresses(db, actor)));
         if (path === "/api/account/addresses" && req.method === "POST") return json(await transact(p, (db) => addAddress(db, actor, body as never)), 201);
+        if (path === "/api/account/wishlist" && req.method === "GET") {
+          return json(await transact(p, (db) => { const saved = db.wishlist.get(actor.id) ?? new Set<string>(); return publicProducts(db).filter((x) => { const row = [...db.products.values()].find((pr) => pr.slug === x.slug); return !!row && saved.has(row.id); }).map((x) => x.slug); }));
+        }
+        if (path === "/api/account/wishlist" && req.method === "POST") {
+          const slug = str(body, "slug"), on = bool(body, "on");
+          const r = await transact(p, (db) => { const row = publicProducts(db).some((x) => x.slug === slug) ? [...db.products.values()].find((pr) => pr.slug === slug) : undefined; if (!row) return null; return setWishlist(db, actor, row.id, on); });
+          return r === null ? notFound() : json({ ok: true, count: r });
+        }
         if (path === "/api/account/export" && req.method === "GET") return json(await transact(p, (db) => exportMyData(db, actor)));
         if (path === "/api/account/delete" && req.method === "POST") {
           await transact(p, (db) => deleteMyAccount(db, actor)); return json({ ok: true }, 200, { "Set-Cookie": sessionCookie("", 0) });

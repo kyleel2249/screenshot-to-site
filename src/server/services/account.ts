@@ -1,3 +1,4 @@
+import { ValidationError } from "./catalog-admin";
 import type { Currency } from "../../lib/domain/money";
 import type { AddressRow, MemoryDb } from "../db";
 import { requirePermission, type Actor } from "../rbac";
@@ -54,6 +55,15 @@ export function toggleWishlist(db: MemoryDb, actor: Actor | null, productId: str
   const me = own(actor); if (!db.products.has(productId)) throw new Error("Unknown product");
   const set = db.wishlist.get(me.id) ?? new Set<string>(); db.wishlist.set(me.id, set);
   if (set.has(productId)) { set.delete(productId); return false; } set.add(productId); return true;
+}
+
+export const WISHLIST_MAX = 200;
+/** Idempotent save/remove (a double-click or retry can't flip it back). Returns the number of saved items. */
+export function setWishlist(db: MemoryDb, actor: Actor | null, productId: string, on: boolean): number {
+  const me = own(actor); if (!db.products.has(productId)) throw new Error("Unknown product");
+  const set = db.wishlist.get(me.id) ?? new Set<string>(); db.wishlist.set(me.id, set);
+  if (on) { if (!set.has(productId) && set.size >= WISHLIST_MAX) throw new ValidationError([`Your saved list is full (${WISHLIST_MAX} items). Remove something first.`]); set.add(productId); } else set.delete(productId);
+  return set.size;
 }
 
 /** Self-service data export: the customer's own data only, never credentials. */

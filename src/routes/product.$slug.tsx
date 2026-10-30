@@ -1,3 +1,4 @@
+import { WishlistButton } from "@/components/WishlistButton";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { useCatalog } from "@/lib/catalog-store";
@@ -74,6 +75,7 @@ function ProductPage() {
         >
           {p.availability === "pre_order" ? "Pre-order now" : purchasable ? "Add to cart" : AVAILABILITY_LABEL[p.availability]}
         </button>
+        <div className="mt-3"><WishlistButton slug={p.slug} name={p.name} /></div>
       </div>
     </div>
     <Reviews slug={p.slug} />

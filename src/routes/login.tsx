@@ -1,3 +1,4 @@
+import { resetWishlist } from "@/lib/wishlist";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { api } from "@/lib/api";
@@ -16,7 +17,7 @@ function Login() {
     e.preventDefault(); setBusy(true); setErrors([]);
     const r = await api.login(email.trim(), pw);
     setBusy(false);
-    if (r.ok) { setPw(""); void nav({ to: "/account" }); } else setErrors(r.errors);
+    if (r.ok) { setPw(""); resetWishlist(); void nav({ to: "/account" }); } else setErrors(r.errors);
   }
   return (
     <Page title="Sign in">

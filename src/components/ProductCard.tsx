@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Stars } from "@/components/Reviews";
+import { WishlistButton } from "@/components/WishlistButton";
 import { toast } from "sonner";
 import { displayPrice, isPurchasable, type StoreProduct } from "@/lib/storefront";
 import { useCart } from "@/lib/cart";
@@ -45,6 +46,7 @@ export function ProductCard({ p }: { p: StoreProduct }) {
         >
           {purchasable ? cta : AVAILABILITY_LABEL[view.availability]}
         </button>
+        <div className="mt-2 text-right"><WishlistButton slug={p.slug} name={p.name} /></div>
       </div>
     </article>
   );

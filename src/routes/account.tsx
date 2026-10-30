@@ -1,3 +1,6 @@
+import { WishlistButton } from "@/components/WishlistButton";
+import { useCatalog } from "@/lib/catalog-store";
+import { resetWishlist, useWishlist } from "@/lib/wishlist";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -16,6 +19,7 @@ type Address = { id: string; recipient: string; region: string; city: string; st
 
 function Account() {
   const nav = useNavigate();
+  const { products } = useCatalog(); const { slugs: saved } = useWishlist();
   const [me, setMe] = useState<Profile | null | undefined>(undefined);
   const [orders, setOrders] = useState<ApiOrder[]>([]); const [addrs, setAddrs] = useState<Address[]>([]);
   const [tickets, setTickets] = useState<Ticket[]>([]);
@@ -89,9 +93,14 @@ function Account() {
             <ol className="mt-2 space-y-2">{t.messages.map((m) => <li key={`${m.at}${m.author}`}><span className="text-xs text-muted-foreground">{m.author === "customer" ? "You" : "Dera Darko Trade"} · {new Date(m.at).toLocaleString()}</span><p className="whitespace-pre-wrap">{m.body}</p></li>)}</ol></li>))}
           {!tickets.length && <li className="text-muted-foreground">No messages. <Link to="/contact" className="underline">Contact us</Link>.</li>}</ul>
       </section>
+      <section aria-labelledby="saved"><h2 id="saved" className="font-display text-xl font-bold">Saved items</h2>
+        <ul className="mt-3 space-y-2 text-sm">{products.filter((x) => saved.has(x.slug)).map((x) => (
+          <li key={x.slug} className="flex items-center justify-between gap-3"><Link to="/product/$slug" params={{ slug: x.slug }} className="underline">{x.name}</Link><WishlistButton slug={x.slug} name={x.name} /></li>))}
+          {!products.some((x) => saved.has(x.slug)) && <li className="text-muted-foreground">Nothing saved yet. Use the ♡ Save button on any product.</li>}</ul>
+      </section>
       <section className="flex flex-wrap gap-3 border-t border-border pt-6" aria-label="Privacy and session">
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void download()}>Download my data</button>
-        <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => nav({ to: "/" }))}>Sign out</button>
+        <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => { resetWishlist(); void nav({ to: "/" }); })}>Sign out</button>
         <button className="rounded-full border border-destructive px-4 py-2 text-sm text-destructive" onClick={() => void remove()}>Delete my account</button>
       </section>
     </Page>

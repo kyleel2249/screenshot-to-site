@@ -68,6 +68,8 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     deleteAccount: () => post<{ ok: true }>("/api/account/delete"),
     checkout: (b: { lines: { variantId: string; qty: number }[]; currency: Currency; region: string; zoneId: string; guestEmail?: string; address: { recipient: string; region: string; city: string; street: string; phone?: string }; discountCode?: string; idempotencyKey: string; acceptedTerms: boolean; preorderAcknowledged?: boolean }) =>
       post<{ order: ApiOrder; trackingSecret?: string; paymentRequired: boolean; paymentAvailable: boolean; paymentMethods: PayMethod[] }>("/api/checkout", b),
+    wishlist: () => get<string[]>("/api/account/wishlist"),
+    setWishlist: (slug: string, on: boolean) => post<{ count: number }>("/api/account/wishlist", { slug, on }),
     paymentConfig: () => get<{ enabled: boolean; provider?: string; methods: Record<"GHS" | "USD", PayMethod[]> }>("/api/payments/config"),
     startPayment: (orderRef: string, trackingSecret?: string, method?: PayMethod) => post<{ redirectUrl: string }>("/api/payments/start", { orderRef, ...(trackingSecret ? { trackingSecret } : {}), ...(method ? { method } : {}) }),
     startBankTransfer: (orderRef: string, trackingSecret?: string) => post<BankTransferInstructions>("/api/payments/bank-transfer", { orderRef, ...(trackingSecret ? { trackingSecret } : {}) }),

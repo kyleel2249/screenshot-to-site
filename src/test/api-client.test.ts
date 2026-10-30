@@ -705,3 +705,35 @@ describe("staff 2FA seed encryption and maintenance", () => {
     expect((await runMaintenance(p, now + 24 * 3_600_000)).released).toBe(0); // idempotent
   });
 });
+
+describe("wishlist", () => {
+  test("customers save and remove by slug, idempotently; hidden/unknown products and guests are refused; lists are private and erased with the account", async () => {
+    const { mk, admin } = await shop();
+    const live = (await admin.createProduct({ name: "Live", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "LIVE", priceGhs: 1000, onHand: 3, published: true })).data!;
+    const hidden = (await admin.createProduct({ name: "Hidden", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "HID", priceGhs: 1000, onHand: 3, published: false })).data!;
+    const slugOf = async (name: string) => (await mk().products()).data!.find((x) => x.name === name)?.slug;
+    const liveSlug = (await slugOf("Live"))!; expect(liveSlug).toBeTruthy(); expect(await slugOf("Hidden")).toBeUndefined(); void live; void hidden;
+    const signUp = async (email: string) => { const c = mk(); await c.register({ email, password: PW, firstName: "A", lastName: "B", acceptTerms: true }); await c.login(email, PW); return c; };
+    const alice = await signUp("alice@w.com"), bob = await signUp("bob@w.com");
+    expect((await mk().wishlist()).status).toBe(401); expect((await mk().setWishlist(liveSlug, true)).status).toBe(401);
+    expect((await alice.setWishlist(liveSlug, true)).data).toEqual({ ok: true, count: 1 });
+    expect((await alice.setWishlist(liveSlug, true)).data).toMatchObject({ count: 1 }); // repeating doesn't flip it
+    expect((await alice.wishlist()).data).toEqual([liveSlug]); expect((await bob.wishlist()).data).toEqual([]);
+    expect((await alice.setWishlist("no-such-item", true)).status).toBe(404);
+    expect((await alice.setWishlist(liveSlug, false)).data).toMatchObject({ count: 0 }); expect((await alice.wishlist()).data).toEqual([]);
+    await alice.setWishlist(liveSlug, true);
+    expect(JSON.stringify((await alice.exportData()).data)).toContain("wishlist");
+    expect((await alice.deleteAccount()).ok).toBe(true);
+  });
+  test("a product that is later hidden disappears from the saved list, and the list is capped", async () => {
+    const { mk, admin, p } = await shop();
+    const made = (await admin.createProduct({ name: "Gone", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "GONE", priceGhs: 1000, onHand: 3, published: true })).data!;
+    const c = mk(); await c.register({ email: "c@w.com", password: PW, firstName: "A", lastName: "B", acceptTerms: true }); await c.login("c@w.com", PW);
+    const slug = (await c.products()).data!.find((x) => x.name === "Gone")!.slug;
+    await c.setWishlist(slug, true); expect((await c.wishlist()).data).toEqual([slug]);
+    await admin.publish(made.id, false); expect((await c.wishlist()).data).toEqual([]); expect((await c.setWishlist(slug, true)).status).toBe(404);
+    await admin.publish(made.id, true);
+    await transact(p, (db) => { const u = [...db.users.values()].find((x) => x.email === "c@w.com")!; db.wishlist.set(u.id, new Set(Array.from({ length: 200 }, (_, i) => `fake${i}`))); });
+    expect((await c.setWishlist(slug, true)).errors[0]).toMatch(/full/);
+  });
+});
