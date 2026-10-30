@@ -22,6 +22,8 @@ echo -n "<owner enrolment reference>" | bun scripts/hash-bootstrap-ref.ts     # 
 wrangler secret put ADMIN_BOOTSTRAP_REF_HASH
 wrangler secret put ADMIN_PORTAL_PATH      # >=12 chars, [a-z0-9-], must not contain "admin"
 wrangler secret put SESSION_SECRET         # 32+ random bytes
+wrangler secret put EMAIL_API_KEY          # optional until you choose a provider (Resend adapter built in)
+wrangler secret put EMAIL_FROM
 wrangler secret put PAYMENT_WEBHOOK_SECRET
 ```
 `SITE_ORIGIN` (e.g. `https://deradarkotrade.com`) is a plain variable; it is the only origin allowed to make state-changing calls.

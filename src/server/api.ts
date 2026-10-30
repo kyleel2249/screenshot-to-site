@@ -29,7 +29,7 @@ import type { Availability } from "../lib/domain/status";
 
 export interface Env {
   SESSION_SECRET: string; SITE_ORIGIN: string; ADMIN_BOOTSTRAP_REF_HASH?: string; ADMIN_PORTAL_PATH?: string;
-  PAYMENT_WEBHOOK_SECRET?: string; PBKDF2_ITERATIONS?: string;
+  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PBKDF2_ITERATIONS?: string;
 }
 export interface Deps {
   /** Outbound email. Tokens are only ever delivered here, never returned in an HTTP response. */
