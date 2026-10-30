@@ -31,3 +31,9 @@ export function securityHeaders(o: HeaderOpts): Record<string, string> {
 }
 /** Authenticated, checkout and admin responses must never be cached by shared caches/CDNs. */
 export const NO_STORE = { "Cache-Control": "private, no-store" } as const;
+
+/** Adds the per-response nonce to every <script> tag that lacks one, so the framework's own inline bootstrap scripts keep working under the strict policy. */
+export function addNonceToScripts(html: string, nonce: string): string {
+  return html.replace(/<script\b([^>]*)>/gi, (m, attrs: string) => (/\snonce\s*=/i.test(attrs) ? m : `<script nonce="${nonce}"${attrs}>`));
+}
+export const newNonce = () => { const b = crypto.getRandomValues(new Uint8Array(16)); return btoa(String.fromCharCode(...b)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };

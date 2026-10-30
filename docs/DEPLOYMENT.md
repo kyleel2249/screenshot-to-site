@@ -61,7 +61,7 @@ Apply `securityHeaders()` (src/lib/security/headers.ts) to HTML responses with a
 | `/sitemap.xml`, `/robots.txt` | generated (published products only) |
 | everything else | TanStack Start SSR, plus security headers; account/checkout/auth/tracking/portal pages are `no-store` + `noindex` |
 
-Without those bindings (plain `vite dev`) pages still render and `/api/*` returns 503. Delete `public/robots.txt` before deploying so the generated one (which carries the Sitemap line) is served. A nonce-based CSP (`buildCsp`) is not applied yet; add it after a real build confirms the framework's inline scripts carry the nonce.
+Without those bindings (plain `vite dev`) pages still render and `/api/*` returns 503. Delete `public/robots.txt` before deploying so the generated one (which carries the Sitemap line) is served. The nonce-based CSP is applied to every HTML page in **report-only** mode by default (the edge adds a fresh nonce to every `<script>` tag). After your first real deploy, browse the shop, checkout and portal, check the logs for `csp-violation` lines (browsers report to `/api/csp-report`), fix anything flagged, then set `CSP_MODE=enforce`. Cached public product pages reuse one nonce for their cache lifetime; that is acceptable because no page reflects user input.
 
 
 ## Two-step verification recovery (owner)
