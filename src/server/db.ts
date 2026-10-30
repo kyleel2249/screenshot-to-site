@@ -3,6 +3,7 @@
  * Production swaps in a D1/Postgres adapter exposing the same shape; services never touch storage directly.
  * Mutations inside one synchronous block are atomic here; a SQL adapter must wrap the same blocks in a transaction.
  */
+import type { PageContent } from "../lib/content";
 import { SEED_CATEGORIES, type CategoryNode } from "../lib/domain/categories";
 import type { Discount, OrderStatus, ShippingZone, VariantRecord } from "../lib/domain/commerce";
 import type { Currency } from "../lib/domain/money";
@@ -54,6 +55,8 @@ export class MemoryDb {
   events: EventRow[] = [];
   wishlist = new Map<string, Set<string>>(); // userId -> productIds
   consents: { userId: string; kind: string; granted: boolean; policyVersion?: string; at: number }[] = [];
+  /** Owner-edited pages by slug; absent = the shipped default. */
+  pages: Record<string, PageContent & { updatedAt: number; updatedBy?: string }> = {};
   quotes = new Map<string, QuoteRow>();
   privacy = new Map<string, PrivacyRequest>();
   tokens = new Map<string, { userId: string; kind: "verify" | "reset" | "invite"; expiresAt: number }>();

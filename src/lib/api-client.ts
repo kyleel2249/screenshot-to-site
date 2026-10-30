@@ -4,6 +4,7 @@
  */
 import type { Availability, PromoLabel } from "./domain/status";
 import type { Currency } from "./domain/money";
+import type { PageContent, Section } from "./content";
 import type { CategoryNode, FilterProfile } from "./domain/categories";
 
 export interface ApiProduct {
@@ -39,6 +40,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
   return {
     products: () => get<ApiProduct[]>("/api/products"),
     categories: () => get<CategoryNode[]>("/api/categories"),
+    page: (slug: string) => get<PageContent>(`/api/pages/${encodeURIComponent(slug)}`),
     event: (b: { consent: boolean; kind: string; path?: string; source?: string; campaign?: string }) => post<{ recorded: boolean }>("/api/events", b),
     myTickets: () => get<Ticket[]>("/api/account/tickets"),
     zones: () => get<{ id: string; name: string; regions: string[]; currency: Currency; baseFee: number; estimate: string }[]>("/api/shipping-zones"),
@@ -96,6 +98,9 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
           return { ok: false, status: res.status, data: null, errors: [msg] };
         } catch { return { ok: false, status: 0, data: null, errors: ["Network error. Check your connection and try again."] }; }
       },
+      pages: () => get<(PageContent & { customised: boolean; legal: boolean; updatedAt: number | null })[]>(`${portal}/api/pages`),
+      savePage: (slug: string, b: { title: string; sections: Section[]; reviewed?: boolean }) => post(`${portal}/api/pages`, { slug, ...b }),
+      resetPage: (slug: string) => post(`${portal}/api/pages/reset`, { slug }),
       quotes: () => get<AdminQuote[]>(`${portal}/api/quotes`),
       sendQuote: (id: string, b: { currency: Currency; total: number; validDays: number; message?: string }) => post(`${portal}/api/quotes/send`, { id, ...b }),
       staff: () => get<StaffMember[]>(`${portal}/api/staff`),

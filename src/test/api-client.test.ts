@@ -380,3 +380,38 @@ describe("two-step lockout", () => {
     expect(await transact(p, (db) => db.audit.some((a) => a.event === "mfa.lockout"))).toBe(true);
   });
 });
+
+describe("editable content pages", () => {
+  test("defaults are served; edits go live; validation; legal review rules; reset", async () => {
+    const { admin, shopper, staff, p, tokens } = await ownerSession();
+    const pub = shopper();
+    expect((await pub.page("privacy")).data).toMatchObject({ title: "Privacy policy", reviewed: false });
+    expect((await pub.page("../etc")).status).toBe(404); expect((await pub.page("nope")).status).toBe(404);
+    expect((await admin.savePage("about", { title: "", sections: [] })).status).toBe(422);
+    expect((await admin.savePage("faq", { title: "FAQ", sections: [{ heading: "", body: "answer only" }] })).errors.join()).toMatch(/question/);
+    expect((await admin.savePage("nope", { title: "x", sections: [{ heading: "", body: "y" }] })).status).toBe(422);
+    const html = "<script>alert(1)</script> Hello";
+    expect((await admin.savePage("about", { title: "About us", sections: [{ heading: "Who we are", body: html }] })).ok).toBe(true);
+    expect((await pub.page("about")).data).toMatchObject({ title: "About us", sections: [{ heading: "Who we are", body: html }] }); // stored as text; the UI renders text only
+    // legal review: owner (fresh sign-in) may mark reviewed; editing afterwards drops it
+    expect((await admin.savePage("terms", { title: "Terms", sections: [{ heading: "", body: "v1" }], reviewed: true })).ok).toBe(true);
+    expect((await pub.page("terms")).data!.reviewed).toBe(true);
+    expect((await admin.savePage("terms", { title: "Terms", sections: [{ heading: "", body: "v1" }] })).ok).toBe(true);
+    expect((await pub.page("terms")).data!.reviewed).toBe(true); // unchanged text keeps the badge for a reviewer
+    expect((await admin.savePage("terms", { title: "Terms", sections: [{ heading: "", body: "v2" }] })).ok).toBe(true);
+    expect((await pub.page("terms")).data!.reviewed).toBe(false); // changed text needs fresh review
+    // a marketing user can edit marketing copy but cannot claim legal review
+    await admin.inviteStaff("mk@shop.test", ["marketing"]); const mk = shopper(); await mk.acceptInvite(tokens.at(-1)!, PW);
+    await signInStaff(mk, PORTAL, "mk@shop.test", PW); const ma = mk.admin(PORTAL);
+    expect((await ma.pages()).ok).toBe(true);
+    expect((await ma.savePage("privacy", { title: "Privacy policy", sections: [{ heading: "", body: "x" }], reviewed: true })).status).toBe(403);
+    expect((await ma.savePage("faq", { title: "FAQ", sections: [{ heading: "Q?", body: "A." }] })).ok).toBe(true);
+    // old sign-in → re-auth needed to mark reviewed
+    await transact(p, (db) => { for (const s of db.sessions.values()) s.authAt = 0; });
+    expect((await admin.savePage("terms", { title: "Terms", sections: [{ heading: "", body: "v2" }], reviewed: true })).status).toBe(403);
+    expect((await admin.reauth(PW)).ok).toBe(true); expect((await admin.savePage("terms", { title: "Terms", sections: [{ heading: "", body: "v2" }], reviewed: true })).ok).toBe(true);
+    expect((await admin.resetPage("about")).ok).toBe(true); expect((await pub.page("about")).data!.title).toBe("About Dera Darko Trade");
+    expect((await admin.pages()).data!.find((x) => x.slug === "faq")).toMatchObject({ customised: true, legal: false });
+    void staff;
+  });
+});

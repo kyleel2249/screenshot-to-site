@@ -19,6 +19,7 @@ import { ConflictError, transact, type Persistence } from "./persistence/transac
 import { addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
 import { adminStoreFor, authenticate, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
 import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
+import { getPage, listPages, resetPage, savePage } from "./services/content";
 import { listQuotes, lookupQuote, requestQuote, respondToQuote, sendQuote } from "./services/quotes";
 import { confirmMfaSetup, mfaState, resetStaffMfa, startMfaSetup, verifyMfa } from "./services/mfa";
 import { acceptInvite, inviteStaff, listStaff, setStaffActive, setStaffRoles } from "./services/staff";
@@ -203,6 +204,9 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         }
         if (sub === "/staff/roles" && req.method === "POST") { await transact(p, (db) => setStaffRoles(db, actor, str(body, "userId"), body["roles"])); return json({ ok: true }); }
         if (sub === "/staff/active" && req.method === "POST") { await transact(p, (db) => setStaffActive(db, actor, str(body, "userId"), bool(body, "active"))); return json({ ok: true }); }
+        if (sub === "/pages" && req.method === "GET") return json(await transact(p, (db) => listPages(db, actor)));
+        if (sub === "/pages" && req.method === "POST") { await transact(p, (db) => savePage(db, actor, str(body, "slug"), { title: body["title"], sections: body["sections"], reviewed: body["reviewed"] })); return json({ ok: true }); }
+        if (sub === "/pages/reset" && req.method === "POST") { await transact(p, (db) => resetPage(db, actor, str(body, "slug"))); return json({ ok: true }); }
         if (sub === "/quotes" && req.method === "GET") return json(await transact(p, (db) => listQuotes(db, actor)));
         if (sub === "/quotes/send" && req.method === "POST") {
           const to = await transact(p, (db) => { sendQuote(db, actor, str(body, "id"), { currency: body["currency"], total: body["total"], validDays: body["validDays"], message: body["message"] }); const q = db.quotes.get(str(body, "id"))!; return { email: q.email, ref: q.ref }; });
@@ -238,6 +242,10 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       // Consent-gated, allow-listed, pseudonymised (see services/analytics.ts). Always 200 so the endpoint reveals nothing.
       const recorded = await transact(p, (db) => track(db, { consent: bool(body, "consent"), kind: str(body, "kind"), path: str(body, "path"), source: str(body, "source"), campaign: str(body, "campaign"), clientKey: ip, secret: env.SESSION_SECRET }));
       return json({ recorded });
+    }
+    if (path.startsWith("/api/pages/") && req.method === "GET") {
+      const page = await transact(p, (db) => getPage(db, path.slice("/api/pages/".length)));
+      return page ? json(page, 200, { "Cache-Control": "public, max-age=60" }) : notFound();
     }
     if (path === "/api/categories" && req.method === "GET") return json(await transact(p, (db) => db.categories.filter((c) => c.published && (!c.parentId || db.categories.find((x) => x.id === c.parentId)?.published))));
     if (path === "/api/shipping-zones" && req.method === "GET") return json(await transact(p, (db) => [...db.zones.values()].map((z) => ({ id: z.id, name: z.name, regions: z.regions, currency: z.currency, baseFee: z.baseFee, estimate: z.estimate }))));

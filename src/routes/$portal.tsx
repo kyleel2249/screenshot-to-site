@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone, AdminQuote, Analytics, StaffMember, Ticket } from "@/lib/api-client";
 import { childrenOf, topLevel, type CategoryNode } from "@/lib/domain/categories";
+import type { Section } from "@/lib/content";
 import { formatMoney } from "@/lib/domain/money";
 import { GHANA_REGIONS } from "@/lib/domain/regions";
 import { AVAILABILITY_LABEL, type Availability } from "@/lib/domain/status";
@@ -20,7 +21,7 @@ export const Route = createFileRoute("/$portal")({
   component: Dashboard,
 });
 
-type Tab = "quotes" | "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
+type Tab = "content" | "quotes" | "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
 const AVAIL = Object.keys(AVAILABILITY_LABEL) as Availability[];
 
 function Dashboard() {
@@ -46,9 +47,9 @@ function Dashboard() {
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => setState("login"))}>Sign out</button>
       </header>
       <nav className="mt-6 flex gap-2" aria-label="Sections" role="tablist">
-        {(["products", "orders", "quotes", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
+        {(["products", "orders", "content", "quotes", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
       </nav>
-      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "quotes" ? <Quotes admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
+      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "content" ? <ContentTab admin={admin} /> : tab === "quotes" ? <Quotes admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
     </div>
   );
 }
@@ -449,6 +450,46 @@ function MfaCode({ admin, onDone }: { admin: Admin; onDone: () => void }) {
         <Field label="6-digit code, or a recovery code" autoComplete="one-time-code" required hint="From your authenticator app. Recovery codes work once each." value={code} onChange={(e) => setCode(e.target.value)} />
         <button className="btn-primary w-full">Verify</button>
       </form>
+    </div>
+  );
+}
+
+type PageRow = { slug: string; title: string; sections: Section[]; reviewed: boolean; customised: boolean; legal: boolean };
+function ContentTab({ admin }: { admin: Admin }) {
+  const { data, errors, reload, setErrors } = useLoad<PageRow[]>(useCallback(() => admin.pages(), [admin]));
+  const [slug, setSlug] = useState<string | null>(null); const [title, setTitle] = useState(""); const [sections, setSections] = useState<Section[]>([]); const [reviewed, setReviewed] = useState(false);
+  const [msg, setMsg] = useState(""); const [pw, setPw] = useState(""); const [need, setNeed] = useState(false);
+  const cur = data?.find((p) => p.slug === slug);
+  const open = (p: PageRow) => { setSlug(p.slug); setTitle(p.title); setSections(p.sections.map((s) => ({ ...s }))); setReviewed(p.reviewed); setMsg(""); setErrors([]); };
+  const run = async (fn: () => Promise<{ ok: boolean; errors: string[] }>, ok: string) => { setMsg(""); setErrors([]); const r = await fn(); if (r.ok) { setMsg(ok); await reload(); } else { setNeed(r.errors.some((e) => /re-?auth/i.test(e))); setErrors(r.errors); } };
+  const edit = (i: number, k: keyof Section, v: string) => setSections(sections.map((s, j) => (j === i ? { ...s, [k]: v } : s)));
+  return (
+    <div className="space-y-6">
+      <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
+      {need && <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void admin.reauth(pw).then((r) => { if (r.ok) { setNeed(false); setPw(""); setErrors([]); setMsg("Confirmed. Save again."); } else setErrors(r.errors); }); }}><input aria-label="Confirm your password" type="password" autoComplete="current-password" className={inputCls} value={pw} onChange={(e) => setPw(e.target.value)} /><button className="btn-primary">Confirm</button></form>}
+      <ul className="divide-y divide-border text-sm">{data?.map((p) => (
+        <li key={p.slug} className="flex flex-wrap items-center justify-between gap-2 py-3">
+          <span><span className="font-semibold">{p.title}</span> <span className="text-muted-foreground">/{p.slug}</span> {p.customised ? <span className="badge-label ml-1">Edited</span> : <span className="text-muted-foreground">(default text)</span>}{p.legal && (p.reviewed ? <span className="badge-label ml-1">Reviewed</span> : <span className="text-muted-foreground"> · draft</span>)}</span>
+          <button className="underline" onClick={() => open(p)}>Edit</button>
+        </li>))}</ul>
+      {cur && (
+        <form className="space-y-4 rounded-lg border border-border p-4" onSubmit={(e) => { e.preventDefault(); void run(() => admin.savePage(cur.slug, { title, sections, ...(cur.legal ? { reviewed } : {}) }), "Page saved and live."); }}>
+          <h2 className="font-display text-lg font-bold">Editing /{cur.slug}</h2>
+          <p className="text-xs text-muted-foreground">Plain text only. Blank lines are kept. {cur.slug === "faq" ? "Each section is a question (heading) and its answer." : "A section's heading is optional."}</p>
+          <Field label="Page title" required value={title} onChange={(e) => setTitle(e.target.value)} />
+          {sections.map((s, i) => (
+            <fieldset key={i} className="space-y-2 rounded-md border border-border p-3"><legend className="px-1 text-xs text-muted-foreground">Section {i + 1}</legend>
+              <Field label={cur.slug === "faq" ? "Question" : "Heading (optional)"} value={s.heading} onChange={(e) => edit(i, "heading", e.target.value)} />
+              <div><label htmlFor={`sec-${i}`} className="mb-1 block text-sm font-medium">Text</label><textarea id={`sec-${i}`} rows={5} className={inputCls} value={s.body} onChange={(e) => edit(i, "body", e.target.value)} /></div>
+              <div className="flex gap-3 text-sm"><button type="button" className="underline" disabled={i === 0} onClick={() => setSections(sections.map((x, j) => (j === i - 1 ? sections[i]! : j === i ? sections[i - 1]! : x)))}>Move up</button>
+                {sections.length > 1 && <button type="button" className="underline text-destructive" onClick={() => setSections(sections.filter((_, j) => j !== i))}>Remove</button>}</div>
+            </fieldset>))}
+          <button type="button" className="underline text-sm" onClick={() => setSections([...sections, { heading: "", body: "" }])}>Add a section</button>
+          {cur.legal && <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" checked={reviewed} onChange={(e) => setReviewed(e.target.checked)} /> I confirm this text has been reviewed by the business owner and by qualified legal advice. (Removes the public “DRAFT” notice. Editing the text later clears this.)</label>}
+          <div className="flex flex-wrap gap-3"><button className="btn-primary">Save page</button><button type="button" className="underline" onClick={() => setSlug(null)}>Close</button>
+            {cur.customised && <button type="button" className="underline text-destructive" onClick={() => { if (window.confirm("Restore the original text for this page?")) void run(() => admin.resetPage(cur.slug), "Restored the default text.").then(() => setSlug(null)); }}>Restore default</button>}</div>
+        </form>
+      )}
     </div>
   );
 }
