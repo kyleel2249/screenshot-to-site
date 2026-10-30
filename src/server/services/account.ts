@@ -62,6 +62,7 @@ export function exportMyData(db: MemoryDb, actor: Actor | null) {
   db.privacy.set(db.nextId("prv"), { id: "", userId: me.id, kind: "export", status: "done", at: Date.now() });
   db.log("privacy.export", { userId: me.id });
   return { profile: getProfile(db, me), addresses: listAddresses(db, me), wishlist: [...(db.wishlist.get(me.id) ?? [])], consents: db.consents.filter((c) => c.userId === me.id),
+    reviews: [...db.reviews.values()].filter((r) => r.userId === me.id).map((r) => ({ product: db.products.get(r.productId)?.name ?? "", rating: r.rating, title: r.title, body: r.body, status: r.status })),
     orders: [...db.orders.values()].filter((o) => o.userId === me.id).map((o) => ({ ref: o.ref, status: o.status, currency: o.currency, total: o.total, items: o.items.map((i) => ({ name: i.name, qty: i.qty, line: i.line })) })) };
 }
 
@@ -71,6 +72,7 @@ export function exportMyData(db: MemoryDb, actor: Actor | null) {
  */
 export function deleteMyAccount(db: MemoryDb, actor: Actor | null) {
   const me = own(actor), u = db.users.get(me.id); if (!u) return;
+  for (const [id, r] of db.reviews) if (r.userId === me.id) db.reviews.delete(id); // reviews are personal content: erased with the account
   for (const o of db.orders.values()) if (o.userId === me.id) { delete o.userId; delete o.guestEmail; o.address = { recipient: "Deleted customer", region: o.address.region, city: "", street: "" }; }
   for (const [k, a] of db.addresses) if (a.userId === me.id) db.addresses.delete(k);
   db.profiles.delete(me.id); db.wishlist.delete(me.id);

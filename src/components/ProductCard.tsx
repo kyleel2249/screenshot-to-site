@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { Stars } from "@/components/Reviews";
 import { toast } from "sonner";
 import { displayPrice, isPurchasable, type StoreProduct } from "@/lib/storefront";
 import { useCart } from "@/lib/cart";
@@ -24,6 +25,7 @@ export function ProductCard({ p }: { p: StoreProduct }) {
       </Link>
       <div className="flex flex-1 flex-col p-4">
         <Link to="/product/$slug" params={{ slug: p.slug }} className="font-medium text-foreground hover:underline">{p.name}</Link>
+        {p.rating && p.rating.count > 0 && <p className="mt-0.5 text-xs text-muted-foreground"><Stars value={p.rating.average} /> {p.rating.average} ({p.rating.count})</p>}
         <div className="mt-1">
           {price.current.map((c, i) => (
             <div key={c.text} className="flex items-baseline gap-2">

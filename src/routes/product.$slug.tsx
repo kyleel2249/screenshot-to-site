@@ -5,6 +5,7 @@ import { useCart } from "@/lib/cart";
 import { useCurrency } from "@/lib/currency";
 import { breadcrumb } from "@/lib/domain/categories";
 import { AVAILABILITY_LABEL, PROMO_LABEL } from "@/lib/domain/status";
+import { Reviews } from "@/components/Reviews";
 import { displayPrice, findProduct, isPurchasable } from "@/lib/storefront";
 
 export const Route = createFileRoute("/product/$slug")({
@@ -39,10 +40,12 @@ function ProductPage() {
   // Structured data mirrors the visible price/availability exactly.
   const ld = {
     "@context": "https://schema.org", "@type": "Product", name: p.name, description: p.shortDescription, image: p.image,
+    ...(p.rating && p.rating.count > 0 ? { aggregateRating: { "@type": "AggregateRating", ratingValue: p.rating.average, reviewCount: p.rating.count } } : {}), // only real, published reviews
     ...(ghs !== undefined ? { offers: { "@type": "Offer", priceCurrency: "GHS", price: (ghs / 100).toFixed(2), availability: p.availability === "available" ? "https://schema.org/InStock" : p.availability === "pre_order" ? "https://schema.org/PreOrder" : "https://schema.org/OutOfStock" } } : {}),
   };
 
   return (
+    <>
     <div className="container-x grid gap-10 py-12 md:grid-cols-2">
       <title>{`${p.name} — Dera Darko Trade`}</title>
       <meta name="description" content={p.shortDescription} />
@@ -82,5 +85,7 @@ function ProductPage() {
         </button>
       </div>
     </div>
+    <Reviews slug={p.slug} />
+    </>
   );
 }

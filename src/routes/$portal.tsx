@@ -1,7 +1,7 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone, AdminQuote, Analytics, StaffMember, Ticket } from "@/lib/api-client";
+import type { AdminDiscount, AdminOrder, AdminProduct, AdminZone, AdminQuote, AdminReview, Analytics, StaffMember, Ticket } from "@/lib/api-client";
 import { childrenOf, topLevel, type CategoryNode } from "@/lib/domain/categories";
 import type { Section } from "@/lib/content";
 import { formatMoney } from "@/lib/domain/money";
@@ -21,7 +21,7 @@ export const Route = createFileRoute("/$portal")({
   component: Dashboard,
 });
 
-type Tab = "content" | "quotes" | "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
+type Tab = "reviews" | "content" | "quotes" | "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
 const AVAIL = Object.keys(AVAILABILITY_LABEL) as Availability[];
 
 function Dashboard() {
@@ -47,9 +47,9 @@ function Dashboard() {
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => setState("login"))}>Sign out</button>
       </header>
       <nav className="mt-6 flex gap-2" aria-label="Sections" role="tablist">
-        {(["products", "orders", "content", "quotes", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
+        {(["products", "orders", "reviews", "content", "quotes", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
       </nav>
-      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "content" ? <ContentTab admin={admin} /> : tab === "quotes" ? <Quotes admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
+      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "reviews" ? <ReviewsTab admin={admin} /> : tab === "content" ? <ContentTab admin={admin} /> : tab === "quotes" ? <Quotes admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
     </div>
   );
 }
@@ -490,6 +490,23 @@ function ContentTab({ admin }: { admin: Admin }) {
             {cur.customised && <button type="button" className="underline text-destructive" onClick={() => { if (window.confirm("Restore the original text for this page?")) void run(() => admin.resetPage(cur.slug), "Restored the default text.").then(() => setSlug(null)); }}>Restore default</button>}</div>
         </form>
       )}
+    </div>
+  );
+}
+
+function ReviewsTab({ admin }: { admin: Admin }) {
+  const { data, errors, reload, setErrors } = useLoad<AdminReview[]>(useCallback(() => admin.reviews(), [admin]));
+  const act = async (id: string, a: "publish" | "reject") => { setErrors([]); const r = await admin.moderateReview(id, a); if (r.ok) await reload(); else setErrors(r.errors); };
+  return (
+    <div className="space-y-4">
+      <Errors errors={errors} />
+      <p className="text-sm text-muted-foreground">Only verified buyers (delivered orders) can review. You can publish or reject a review but not edit it, and shouldn't reject honest negative reviews — hiding genuine criticism misleads shoppers.</p>
+      <ul className="divide-y divide-border text-sm">{data?.map((r) => (
+        <li key={r.id} className="space-y-1 py-3">
+          <p className="font-semibold">{r.product} · {"★".repeat(r.rating)}{"☆".repeat(5 - r.rating)} · {r.author} <span className="badge-label ml-1">{r.status}</span></p>
+          {r.title && <p className="font-medium">{r.title}</p>}<p className="whitespace-pre-line text-foreground/80">{r.body}</p>
+          <div className="flex gap-3">{r.status !== "published" && <button className="underline" onClick={() => void act(r.id, "publish")}>Publish</button>}{r.status !== "rejected" && <button className="underline" onClick={() => void act(r.id, "reject")}>Reject</button>}</div>
+        </li>))}{data && !data.length && <li className="py-3 text-muted-foreground">No reviews yet.</li>}</ul>
     </div>
   );
 }

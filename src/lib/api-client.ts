@@ -9,6 +9,7 @@ import type { CategoryNode, FilterProfile } from "./domain/categories";
 
 export interface ApiProduct {
   slug: string; name: string; categoryId: string; createdAt: string; shortDescription: string; image: string; imageAlt: string;
+  rating?: { count: number; average: number };
   availability: Availability; labels: PromoLabel[]; price: Partial<Record<Currency, number>>; salePrice: Partial<Record<Currency, number>> | null;
   variantId: string; remaining?: number; expectedWindow?: string | null;
 }
@@ -40,6 +41,8 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
   return {
     products: () => get<ApiProduct[]>("/api/products"),
     categories: () => get<CategoryNode[]>("/api/categories"),
+    reviews: (slug: string) => get<ReviewList>(`/api/reviews?slug=${encodeURIComponent(slug)}`),
+    submitReview: (slug: string, b: { rating: number; title: string; body: string }) => post("/api/reviews", { slug, ...b }),
     page: (slug: string) => get<PageContent>(`/api/pages/${encodeURIComponent(slug)}`),
     event: (b: { consent: boolean; kind: string; path?: string; source?: string; campaign?: string }) => post<{ recorded: boolean }>("/api/events", b),
     myTickets: () => get<Ticket[]>("/api/account/tickets"),
@@ -100,6 +103,8 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
           return { ok: false, status: res.status, data: null, errors: [msg] };
         } catch { return { ok: false, status: 0, data: null, errors: ["Network error. Check your connection and try again."] }; }
       },
+      reviews: () => get<AdminReview[]>(`${portal}/api/reviews`),
+      moderateReview: (id: string, action: "publish" | "reject") => post(`${portal}/api/reviews/moderate`, { id, action }),
       pages: () => get<(PageContent & { customised: boolean; legal: boolean; updatedAt: number | null })[]>(`${portal}/api/pages`),
       savePage: (slug: string, b: { title: string; sections: Section[]; reviewed?: boolean }) => post(`${portal}/api/pages`, { slug, ...b }),
       resetPage: (slug: string) => post(`${portal}/api/pages/reset`, { slug }),
@@ -126,6 +131,8 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
 export interface AdminProduct { id: string; slug: string; name: string; archived: boolean; variantId: string | null; sku: string | null; availability: Availability | null; published: boolean; price: Partial<Record<Currency, number>>; salePrice: Partial<Record<Currency, number>> | null; onHand: number; reserved: number; preOrderEnabled: boolean }
 export interface QuoteView { ref: string; status: "new" | "quoted" | "accepted" | "declined" | "expired"; items: { description: string; qty: number }[]; createdAt: number; quote?: { currency: Currency; total: number; validUntil: number; message: string } }
 export interface AdminQuote { id: string; ref: string; business: string; contactName: string; email: string; phone: string | null; region: string; notes: string; items: { description: string; qty: number }[]; status: QuoteView["status"]; quote: (QuoteView["quote"] & { quotedAt: number }) | null; createdAt: number }
+export interface ReviewList { summary: { count: number; average: number }; reviews: { rating: number; title: string; body: string; author: string; at: number }[]; canReview: boolean; myReview: { status: string } | null }
+export interface AdminReview { id: string; product: string; rating: number; title: string; body: string; author: string; status: "pending" | "published" | "rejected"; createdAt: number }
 export interface StaffMember { id: string; email: string; roles: string[]; state: "active" | "invited" | "suspended"; createdAt: number }
 export interface Ticket { id: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: string; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }
 export interface Analytics { days: number; funnel: { productViews: number; addToCart: number; checkoutStarts: number; paidOrders: number }; revenue: Record<string, { gross: number; refunds: number; net: number; orders: number }> }

@@ -19,6 +19,7 @@ import { ConflictError, transact, type Persistence } from "./persistence/transac
 import { addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
 import { adminStoreFor, authenticate, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
 import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
+import { listForModeration, listPublished, moderate, submitReview, summary } from "./services/reviews";
 import { getPage, listPages, resetPage, savePage } from "./services/content";
 import { providerFromEnv, type PaymentProvider } from "../lib/payments/provider";
 import { listQuotes, lookupQuote, requestQuote, respondToQuote, sendQuote } from "./services/quotes";
@@ -83,7 +84,7 @@ function publicProducts(db: MemoryDb, now = new Date()) {
     out.push({
       slug: p.slug, name: p.name, categoryId: p.categoryId, createdAt: p.createdAt, shortDescription: p.shortDescription, image: p.image, imageAlt: p.imageAlt,
       availability: effectiveAvailability(v), labels: activePromoLabels(p.promo, v, { ...(p.showLimitedBelow !== undefined ? { showLimitedBelow: p.showLimitedBelow } : {}), hasValidSale: hasSale }, now),
-      price: v.price, salePrice: v.salePrice ?? null, variantId: v.id,
+      price: v.price, salePrice: v.salePrice ?? null, variantId: v.id, rating: summary(db, p.id),
       ...(p.showLimitedBelow !== undefined && v.trackInventory && sellableQty(v) > 0 && sellableQty(v) <= p.showLimitedBelow ? { remaining: sellableQty(v) } : {}),
       ...(v.availability === "pre_order" ? { expectedWindow: p.expectedWindow ?? null } : {}),
     });
@@ -217,6 +218,8 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         }
         if (sub === "/staff/roles" && req.method === "POST") { await transact(p, (db) => setStaffRoles(db, actor, str(body, "userId"), body["roles"])); return json({ ok: true }); }
         if (sub === "/staff/active" && req.method === "POST") { await transact(p, (db) => setStaffActive(db, actor, str(body, "userId"), bool(body, "active"))); return json({ ok: true }); }
+        if (sub === "/reviews" && req.method === "GET") return json(await transact(p, (db) => listForModeration(db, actor)));
+        if (sub === "/reviews/moderate" && req.method === "POST") { await transact(p, (db) => moderate(db, actor, str(body, "id"), body["action"])); return json({ ok: true }); }
         if (sub === "/pages" && req.method === "GET") return json(await transact(p, (db) => listPages(db, actor)));
         if (sub === "/pages" && req.method === "POST") { await transact(p, (db) => savePage(db, actor, str(body, "slug"), { title: body["title"], sections: body["sections"], reviewed: body["reviewed"] })); return json({ ok: true }); }
         if (sub === "/pages/reset" && req.method === "POST") { await transact(p, (db) => resetPage(db, actor, str(body, "slug"))); return json({ ok: true }); }
@@ -255,6 +258,16 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       // Consent-gated, allow-listed, pseudonymised (see services/analytics.ts). Always 200 so the endpoint reveals nothing.
       const recorded = await transact(p, (db) => track(db, { consent: bool(body, "consent"), kind: str(body, "kind"), path: str(body, "path"), source: str(body, "source"), campaign: str(body, "campaign"), clientKey: ip, secret: env.SESSION_SECRET }));
       return json({ recorded });
+    }
+    if (path === "/api/reviews" && req.method === "GET") {
+      const { actor } = await who();
+      const r = await transact(p, (db) => listPublished(db, actor, url.searchParams.get("slug") ?? ""));
+      return r ? json(r) : notFound();
+    }
+    if (path === "/api/reviews" && req.method === "POST") {
+      if (!limiters.auth.check(`rev:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const { actor } = await who();
+      try { await transact(p, (db) => submitReview(db, actor, str(body, "slug"), { rating: body["rating"], title: body["title"], body: body["body"] })); return json({ ok: true }, 201); } catch (e) { return mapError(e); }
     }
     if (path.startsWith("/api/pages/") && req.method === "GET") {
       const page = await transact(p, (db) => getPage(db, path.slice("/api/pages/".length)));

@@ -35,6 +35,7 @@ export interface QuoteRow {
   quote?: { currency: "GHS" | "USD"; total: number; validUntil: number; message: string; quotedAt: number };
   createdAt: number;
 }
+export interface ReviewRow { id: string; productId: string; userId: string; orderId: string; rating: number; title: string; body: string; author: string; status: "pending" | "published" | "rejected"; createdAt: number }
 export interface PrivacyRequest { id: string; userId: string; kind: "export" | "deletion" | "correction"; status: "open" | "done"; at: number }
 export interface AuditRow { id: number; actor?: string; event: string; detail: Record<string, string | number | boolean>; at: number }
 
@@ -57,6 +58,7 @@ export class MemoryDb {
   consents: { userId: string; kind: string; granted: boolean; policyVersion?: string; at: number }[] = [];
   /** Owner-edited pages by slug; absent = the shipped default. */
   pages: Record<string, PageContent & { updatedAt: number; updatedBy?: string }> = {};
+  reviews = new Map<string, ReviewRow>();
   quotes = new Map<string, QuoteRow>();
   privacy = new Map<string, PrivacyRequest>();
   tokens = new Map<string, { userId: string; kind: "verify" | "reset" | "invite"; expiresAt: number }>();

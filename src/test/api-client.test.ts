@@ -485,3 +485,39 @@ describe("online payment flow", () => {
     expect(await ok.parseWebhook(other, new Headers({ "x-paystack-signature": await hmacHex("sk_test_x", other, "SHA-512") }))).toBe("ignored");
   });
 });
+
+describe("verified-buyer reviews", () => {
+  test("only delivered buyers review, once; moderated before public; summary honest; erased with the account", async () => {
+    const { admin, shopper, p } = await ownerSession();
+    const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 9, published: true });
+    const slug = prod.data!.slug, variantId = `${prod.data!.id}::CAP`;
+    const mkCustomer = async (email: string) => { const c = shopper(); await c.register({ email, password: PW, firstName: "Ama", lastName: "Mensah", acceptTerms: true }); await c.login(email, PW); return c; };
+    const ama = await mkCustomer("ama@x.com"), kofi = await mkCustomer("kofi@x.com"), guest = shopper();
+    const buy = (c: typeof ama) => c.checkout({ lines: [{ variantId, qty: 1 }], currency: "GHS", region: "Greater Accra", zoneId: "z", address: { recipient: "A", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: `k${Math.random()}`, acceptedTerms: true });
+    const amaOrder = (await buy(ama)).data!.order; await buy(kofi);
+    const good = { rating: 5, title: "Great", body: "Fits perfectly and arrived on time." };
+    expect((await guest.submitReview(slug, good)).status).toBe(422); // not signed in
+    expect((await ama.submitReview(slug, good)).errors[0]).toMatch(/delivered/); // ordered but not delivered
+    expect((await ama.reviews(slug)).data!.canReview).toBe(false);
+    await transact(p, (db) => { for (const o of db.orders.values()) if (o.id === amaOrder.id) o.status = "delivered"; });
+    expect((await ama.reviews(slug)).data!.canReview).toBe(true); expect((await kofi.reviews(slug)).data!.canReview).toBe(false);
+    for (const bad of [{ ...good, rating: 6 }, { ...good, rating: 4.5 }, { ...good, body: "short" }, { ...good, title: "x".repeat(101) }]) expect((await ama.submitReview(slug, bad)).status).toBe(422);
+    expect((await ama.submitReview("nope", good)).status).toBe(422);
+    expect((await ama.submitReview(slug, { ...good, body: "<b>bold</b> works fine really" })).ok).toBe(true);
+    expect((await ama.submitReview(slug, good)).errors[0]).toMatch(/already/);
+    expect((await guest.reviews(slug)).data).toMatchObject({ summary: { count: 0 }, reviews: [] }); // pending is invisible
+    expect((await ama.reviews(slug)).data).toMatchObject({ canReview: false, myReview: { status: "pending" } });
+    const queue = (await admin.reviews()).data!; expect(queue[0]).toMatchObject({ status: "pending", author: "Ama M.", product: "Cap" });
+    expect((await admin.moderateReview(queue[0]!.id, "edit" as never)).status).toBe(422);
+    expect((await admin.moderateReview(queue[0]!.id, "publish")).ok).toBe(true);
+    expect((await guest.reviews(slug)).data).toMatchObject({ summary: { count: 1, average: 5 }, reviews: [{ author: "Ama M.", rating: 5 }] });
+    expect((await guest.products()).data![0]!.rating).toEqual({ count: 1, average: 5 });
+    expect(JSON.stringify((await guest.reviews(slug)).data)).not.toContain("ama@x.com"); // no PII
+    // rejected reviews never show; customers can't moderate; deletion erases the review
+    await admin.moderateReview(queue[0]!.id, "reject"); expect((await guest.reviews(slug)).data!.summary.count).toBe(0);
+    expect((await shopper().admin(PORTAL).reviews()).status).toBe(404);
+    await admin.moderateReview(queue[0]!.id, "publish"); await ama.deleteAccount();
+    expect((await guest.reviews(slug)).data!.summary.count).toBe(0);
+    expect(await transact(p, (db) => db.reviews.size)).toBe(0);
+  });
+});
