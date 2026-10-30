@@ -55,3 +55,7 @@ Apply `securityHeaders()` (src/lib/security/headers.ts) to HTML responses with a
 | everything else | TanStack Start SSR, plus security headers; account/checkout/auth/tracking/portal pages are `no-store` + `noindex` |
 
 Without those bindings (plain `vite dev`) pages still render and `/api/*` returns 503. Delete `public/robots.txt` before deploying so the generated one (which carries the Sitemap line) is served. A nonce-based CSP (`buildCsp`) is not applied yet; add it after a real build confirms the framework's inline scripts carry the nonce.
+
+
+## Two-step verification recovery (owner)
+Every staff account must use an authenticator app. If the owner loses both the phone and the recovery codes, an operator with D1 access clears the owner's `mfa` field in the stored state (the `users` entry for the owner), after which the next sign-in forces a fresh setup. Other staff are reset by the owner from Dashboard → Staff → Reset 2-step. Keep the owner's recovery codes offline.

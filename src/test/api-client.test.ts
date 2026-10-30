@@ -1,3 +1,5 @@
+import { signInStaff } from "./staff-signin";
+import { totp } from "../lib/security/totp";
 import { describe, expect, test } from "vitest";
 import { SEED_CATEGORIES } from "../lib/domain/categories";
 import { createClient } from "../lib/api-client";
@@ -46,7 +48,7 @@ describe("api client against the real handler", () => {
     // owner enrolment + login (portal path is typed by the owner; it is not in any bundle)
     expect((await api.admin(PORTAL).enrol({ reference: "ref", email: "owner@shop.test", password: PW })).ok).toBe(true);
     await api.verifyEmail(tokens[tokens.length - 1]!);
-    expect((await api.login("owner@shop.test", PW)).ok).toBe(true);
+    expect((await signInStaff(api, PORTAL, "owner@shop.test", PW)).ok).toBe(true);
     const admin = api.admin(PORTAL);
     // a staff session must not break the storefront's 'am I a customer?' probe, and zones are public
     expect((await api.me()).status).toBeLessThan(500); expect((await api.me()).ok).toBe(false);
@@ -70,7 +72,7 @@ describe("shipping zones and discounts through the client", () => {
   async function owner() {
     const b = await browser();
     await b.api.admin(PORTAL).enrol({ reference: "ref", email: "owner@shop.test", password: PW });
-    await b.api.verifyEmail(b.tokens[b.tokens.length - 1]!); await b.api.login("owner@shop.test", PW);
+    await b.api.verifyEmail(b.tokens[b.tokens.length - 1]!); await signInStaff(b.api, PORTAL, "owner@shop.test", PW);
     return { ...b, admin: b.api.admin(PORTAL) };
   }
   test("zones: validated, saved, public, editable, deletable", async () => {
@@ -103,7 +105,7 @@ describe("shipping zones and discounts through the client", () => {
   test("a fulfilment user cannot read or change zones or discounts", async () => {
     const { p, admin, api } = await owner();
     await transact(p, (db) => { const u = [...db.users.values()].find((x) => x.email === "owner@shop.test")!; u.roles = ["fulfilment"]; });
-    await api.logout(); await api.login("owner@shop.test", PW);
+    await api.logout(); await signInStaff(api, PORTAL, "owner@shop.test", PW);
     for (const r of [await admin.zones(), await admin.discounts(), await admin.saveZone({ name: "a", regions: ["Volta"], currency: "GHS", baseFee: 1, estimate: "e" }), await admin.saveDiscount({ code: "ABC", kind: "free_shipping", value: 0 })]) expect(r.status).toBe(403);
   });
 });
@@ -120,7 +122,7 @@ describe("category administration through the client", () => {
       return res;
     };
     const api = createClient({ fetchImpl, origin: ORIGIN }); const admin = api.admin(PORTAL);
-    await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await api.verifyEmail(tokens.at(-1)!); await api.login("owner@shop.test", PW);
+    await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await api.verifyEmail(tokens.at(-1)!); await signInStaff(api, PORTAL, "owner@shop.test", PW);
     return { api, admin, p };
   }
   test("a brand-new shop already has the standard categories, so the first product can be added", async () => {
@@ -165,7 +167,7 @@ async function ownerSession() {
     return createClient({ fetchImpl, origin: ORIGIN });
   };
   const staff = mk(); const admin = staff.admin(PORTAL);
-  await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await staff.verifyEmail(tokens.at(-1)!); await staff.login("owner@shop.test", PW);
+  await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await staff.verifyEmail(tokens.at(-1)!); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
   return { p, staff, admin, shopper: mk, tokens };
 }
 
@@ -209,7 +211,7 @@ describe("support inbox, analytics and hidden categories", () => {
     await admin.setCategoryHidden("cat-shoes-and-footwear", false);
     expect((await shopper().products()).data).toHaveLength(1);
     await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["fulfilment"]; });
-    await staff.logout(); await staff.login("owner@shop.test", PW);
+    await staff.logout(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     expect((await admin.analytics()).status).toBe(403); expect((await admin.tickets()).status).toBe(403);
   });
 });
@@ -238,23 +240,23 @@ describe("staff invitations", () => {
     const first = tokens.at(-1)!;
     expect((await admin.staff()).data!.find((s) => s.email === "a@shop.test")!.state).toBe("invited");
     const sam = shopper();
-    expect((await sam.login("a@shop.test", PW)).ok).toBe(false); // can't sign in before accepting
+    expect((await signInStaff(sam, PORTAL, "a@shop.test", PW)).ok).toBe(false); // can't sign in before accepting
     expect((await admin.inviteStaff("a@shop.test", ["support", "analyst"])).ok).toBe(true); // re-invite kills old link
     expect((await sam.acceptInvite(first, PW)).ok).toBe(false);
     expect((await sam.acceptInvite(tokens.at(-1)!, "weak")).ok).toBe(false);
     // a weak password is rejected before the link is consumed, so a typo doesn't burn the invitation
     expect((await admin.inviteStaff("a@shop.test", ["support"])).ok).toBe(true);
     expect((await sam.acceptInvite(tokens.at(-1)!, PW)).ok).toBe(true);
-    expect((await sam.login("a@shop.test", PW)).ok).toBe(true);
+    expect((await signInStaff(sam, PORTAL, "a@shop.test", PW)).ok).toBe(true);
     const samAdmin = sam.admin(PORTAL);
     expect((await samAdmin.tickets()).ok).toBe(true); expect((await samAdmin.zones()).status).toBe(403); expect((await samAdmin.staff()).status).toBe(403);
     const id = (await admin.staff()).data!.find((s) => s.email === "a@shop.test")!.id;
     await admin.setStaffRoles(id, ["fulfilment"]);
     expect((await samAdmin.orders()).status).toBe(404); // sessions revoked on role change (portal answers 404 to anyone not signed in)
-    await sam.login("a@shop.test", PW); expect((await samAdmin.orders()).ok).toBe(true);
+    await signInStaff(sam, PORTAL, "a@shop.test", PW); expect((await samAdmin.orders()).ok).toBe(true);
     await admin.setStaffActive(id, false); expect((await samAdmin.orders()).status).toBe(404);
-    expect((await sam.login("a@shop.test", PW)).ok).toBe(false);
-    await admin.setStaffActive(id, true); expect((await sam.login("a@shop.test", PW)).ok).toBe(true);
+    expect((await signInStaff(sam, PORTAL, "a@shop.test", PW)).ok).toBe(false);
+    await admin.setStaffActive(id, true); expect((await signInStaff(sam, PORTAL, "a@shop.test", PW)).ok).toBe(true);
     const owner = (await admin.staff()).data!.find((s) => s.roles.includes("owner"))!;
     expect((await admin.setStaffActive(owner.id, false)).status).toBe(422); expect((await admin.setStaffRoles(owner.id, ["support"])).status).toBe(422);
     expect(await transact(p, (db) => [...db.audit].map((a) => a.event).filter((e) => e.startsWith("staff.")))).toContain("staff.invite_accepted");
@@ -295,7 +297,7 @@ describe("wholesale quotes", () => {
     // support role can't price quotes; anonymous can't list
     expect((await shopper().admin(PORTAL).quotes()).status).toBe(404);
     await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["analyst"]; });
-    await staff.logout(); await staff.login("owner@shop.test", PW);
+    await staff.logout(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     expect((await admin.quotes()).ok).toBe(true); expect((await admin.sendQuote(id2, { currency: "GHS", total: 5, validDays: 1 })).status).toBe(403);
   });
 });
@@ -312,7 +314,7 @@ describe("notification emails", () => {
       const res = await handle(new Request(ORIGIN + url, { ...init, headers: h }), env, p, { mail: async (_t, _x, d) => { toks.push(d.token); }, notify: async (to, t, d) => { sent.push({ to, t, ref: d.ref }); } });
       const sc = res.headers.get("set-cookie"); if (sc) jar = sc.split(";")[0]!.endsWith("=") ? "" : sc.split(";")[0]!; return res; } }); };
     const staff = mk(); const admin = staff.admin(PORTAL);
-    await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await staff.verifyEmail(toks.at(-1)!); await staff.login("owner@shop.test", PW);
+    await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await staff.verifyEmail(toks.at(-1)!); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 5, published: true });
     const buyer = mk();
     const body = { lines: [{ variantId: `${prod.data!.id}::CAP`, qty: 1 }], currency: "GHS" as const, region: "Greater Accra", zoneId: "z", guestEmail: "g@x.com", address: { recipient: "R", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: "same", acceptedTerms: true };
@@ -326,5 +328,55 @@ describe("notification emails", () => {
     await admin.replyTicket(tid, "private note", true); expect(sent.filter((s) => s.t === "ticket_reply")).toHaveLength(0);
     await admin.replyTicket(tid, "Hello!"); expect(sent.at(-1)).toEqual({ to: "h@x.com", t: "ticket_reply", ref: tid });
     expect(JSON.stringify(sent)).not.toContain("Hello!"); // bodies never go in notices
+  });
+});
+
+describe("staff two-step verification", () => {
+  test("password alone opens nothing; wrong codes fail; setup, replay, recovery codes and reset behave", async () => {
+    const { admin, staff, shopper, tokens, p } = await ownerSession(); // owner is already enrolled by the helper
+    // a brand-new invited colleague signs in with password only
+    await admin.inviteStaff("m@shop.test", ["manager"]); const sam = shopper(); await sam.acceptInvite(tokens.at(-1)!, PW);
+    expect((await sam.login("m@shop.test", PW)).ok).toBe(true);
+    const sa = sam.admin(PORTAL);
+    expect((await sa.me()).data).toMatchObject({ mfa: "setup_required", roles: [] }); // roles are not even revealed
+    for (const r of [await sa.products(), await sa.orders(), await sa.zones(), await sa.analytics(), await sa.staff()]) expect(r.status).toBe(403);
+    expect((await sa.mfaConfirm("123456")).status).toBe(422); // confirm before setup
+    const setup = await sa.mfaSetup(); expect(setup.data!.otpauth).toContain("otpauth://totp/");
+    expect((await sa.mfaConfirm("000000")).status).toBe(422);
+    expect((await sa.products()).status).toBe(403); // still locked
+    const good = await totp(setup.data!.secret);
+    const conf = await sa.mfaConfirm(good); expect(conf.data!.recoveryCodes).toHaveLength(8);
+    expect((await sa.products()).ok).toBe(true); expect((await sa.me()).data).toMatchObject({ mfa: "verified", roles: ["manager"] });
+    expect((await sa.mfaSetup()).status).toBe(422); // can't silently replace a confirmed secret
+    const stored = await transact(p, (db) => JSON.stringify([...db.users.values()].find((u) => u.email === "m@shop.test")!.mfa));
+    for (const c of conf.data!.recoveryCodes) expect(stored).not.toContain(c); // only hashes at rest
+    // new sign-in: code required, same TOTP step is a replay, recovery code works once
+    await sam.logout(); await sam.login("m@shop.test", PW);
+    expect((await sa.me()).data).toMatchObject({ mfa: "code_required", roles: [] });
+    expect((await sa.products()).status).toBe(403);
+    expect((await sa.mfaVerify(good)).status).toBe(401); // replay of the code used at setup
+    expect((await sa.mfaVerify("nope")).status).toBe(401);
+    const rc = conf.data!.recoveryCodes;
+    expect((await sa.mfaVerify(rc[0]!)).ok).toBe(true); expect((await sa.products()).ok).toBe(true);
+    await sam.logout(); await sam.login("m@shop.test", PW);
+    expect((await sa.mfaVerify(rc[0]!)).status).toBe(401); // used codes are gone
+    expect((await sa.mfaVerify(rc[1]!.toUpperCase())).ok).toBe(true);
+    // owner resets: sessions die, setup required again; owner and self can't be reset
+    const id = (await admin.staff()).data!.find((s) => s.email === "m@shop.test")!.id;
+    expect((await admin.resetStaffMfa(id)).ok).toBe(true); expect((await sa.products()).status).toBe(404);
+    await sam.login("m@shop.test", PW); expect((await sa.me()).data!.mfa).toBe("setup_required");
+    const me = (await admin.me()).data!.id; expect((await admin.resetStaffMfa(me)).status).toBe(422);
+    expect((await staff.logout()).ok).toBe(true);
+  });
+});
+
+describe("two-step lockout", () => {
+  test("five wrong codes end the session, even though each attempt is under the request rate limit", async () => {
+    const { admin, staff, p } = await ownerSession(); await staff.logout(); await signInStaff(staff, PORTAL, "owner@shop.test", PW).catch(() => 0);
+    await staff.logout(); await staff.login("owner@shop.test", PW);
+    for (let i = 0; i < 4; i++) expect((await admin.mfaVerify(`10000${i}`)).status).toBe(401);
+    expect((await admin.mfaVerify("100009")).status).toBe(401); // 5th miss
+    expect((await admin.me()).status).toBe(404); // session revoked: portal looks like it doesn't exist
+    expect(await transact(p, (db) => db.audit.some((a) => a.event === "mfa.lockout"))).toBe(true);
   });
 });

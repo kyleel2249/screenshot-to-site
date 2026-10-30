@@ -20,7 +20,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
 /** High-impact actions that additionally need a recent re-authentication. */
 export const SENSITIVE: Permission[] = ["order.refund", "export.data", "staff.manage", "settings.write"];
 
-export interface Actor { id: string; kind: "staff" | "customer"; roles: Role[]; recentAuthAt?: number }
+export interface Actor { id: string; kind: "staff" | "customer"; roles: Role[]; recentAuthAt?: number; mfaOk?: boolean }
 
 export class Forbidden extends Error { constructor(msg = "Forbidden") { super(msg); this.name = "Forbidden"; } }
 

@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { SEED_CATEGORIES } from "../lib/domain/categories";
 import { hmacHex } from "../lib/payments/webhook";
 import { sha256Hex } from "../lib/security/crypto";
+import { totp } from "../lib/security/totp";
 import { handle, type Env } from "../server/api";
 import { MemoryPersistence, transact } from "../server/persistence/transact";
 
@@ -37,7 +38,11 @@ async function ownerSession(w: W) {
   expect((await w.call("/api/verify-email", { body: { token: verify.token } })).status).toBe(200);
   const l = await w.call("/api/login", { body: { email: "owner@shop.test", password: PW } });
   expect(l.status).toBe(200);
-  return w.cookieFrom(l);
+  const cookie = w.cookieFrom(l);
+  const set = await w.call(`${PORTAL}/api/mfa/setup`, { body: {}, cookie });
+  const conf = await w.call(`${PORTAL}/api/mfa/confirm`, { body: { code: await totp(set.data.secret) }, cookie });
+  expect(conf.status).toBe(200);
+  return cookie;
 }
 const newProd = (o: Record<string, unknown> = {}) => ({ name: "Test Phone", categoryId: "cat-phones-and-accessories--mobile-phones", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "PH1", priceGhs: 100000, priceUsd: 6500, onHand: 3, published: true, ...o });
 

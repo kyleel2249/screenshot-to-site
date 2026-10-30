@@ -14,7 +14,7 @@ export interface ProductRow {
   image: string; imageAlt: string; promo: PromoWindow[]; showLimitedBelow?: number; expectedWindow?: string; attributes: Record<string, string>;
   createdAt: string; updatedAt: string; archived: boolean;
 }
-export interface UserRow { id: string; email: string; passwordHash: string; kind: "customer" | "staff"; roles: Role[]; status: "active" | "suspended" | "deleted"; emailVerified: boolean; failedLogins: number; lockedUntil: number; mfaRequired: boolean; createdAt: number }
+export interface UserRow { id: string; email: string; passwordHash: string; kind: "customer" | "staff"; roles: Role[]; status: "active" | "suspended" | "deleted"; emailVerified: boolean; failedLogins: number; lockedUntil: number; mfaRequired: boolean; mfa?: { secret: string; confirmed: boolean; lastStep: number; recovery: string[]; failures?: number }; createdAt: number }
 export interface ProfileRow { userId: string; firstName: string; lastName: string; phone?: string; preferredCurrency?: Currency; marketingConsent: boolean }
 export interface AddressRow { id: string; userId: string; recipient: string; region: string; city: string; street: string; phone?: string; isDefault: boolean }
 export interface OrderItemRow { variantId: string; name: string; sku: string; unit: number; qty: number; line: number; mode: "stock" | "preorder" | "backorder" }
@@ -24,7 +24,7 @@ export interface OrderRow {
   items: OrderItemRow[]; hasPreorder: boolean; trackingSecretHash: string; processedEvents: string[]; history: { from: OrderStatus | null; to: OrderStatus; actor?: string; at: number; note?: string }[];
   reservedUntil: number; createdAt: number; refunded: number;
 }
-export interface SessionRow { id: string; userId: string; expiresAt: number; revoked: boolean; authAt: number }
+export interface SessionRow { id: string; userId: string; expiresAt: number; revoked: boolean; authAt: number; mfaOk?: boolean }
 export interface TicketRow { id: string; userId?: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: "low" | "normal" | "high"; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }
 export interface EventRow { session: string; kind: string; path?: string; source?: string; campaign?: string; orderRef?: string; at: number }
 export interface QuoteRow {

@@ -51,7 +51,7 @@ export async function login(db: MemoryDb, i: { email: string; password: string; 
   if (u.kind === "staff" && !u.emailVerified) return { ok: false as const, error: GENERIC_LOGIN_ERROR };
   u.failedLogins = 0;
   const sid = db.nextId("ses");
-  db.sessions.set(sid, { id: sid, userId: u.id, expiresAt: now + SESSION_MS, revoked: false, authAt: now });
+  db.sessions.set(sid, { id: sid, userId: u.id, expiresAt: now + SESSION_MS, revoked: false, authAt: now, mfaOk: u.kind !== "staff" }); // staff sessions are unusable until the second factor is proven
   db.log("login.success", { userId: u.id });
   return { ok: true as const, token: await signSession({ sid, sub: u.id, exp: now + SESSION_MS }, i.secret), authAt: now };
 }
@@ -62,7 +62,7 @@ export async function authenticate(db: MemoryDb, token: string | undefined, secr
   const p = await verifySession(token, secret, now); if (!p) return null;
   const s = db.sessions.get(p.sid); const u = db.users.get(p.sub);
   if (!s || s.revoked || s.expiresAt < now || !u || u.status !== "active" || s.userId !== u.id) return null;
-  return { id: u.id, kind: u.kind, roles: u.roles, recentAuthAt: s.authAt }; // derived from the server-side session, never from the client
+  return { id: u.id, kind: u.kind, roles: u.roles, recentAuthAt: s.authAt, mfaOk: u.kind !== "staff" || s.mfaOk === true }; // derived from the server-side session, never from the client
 }
 /** Step-up: re-verify the password to refresh the session's recent-authentication time (needed for refunds/exports). */
 export async function reauthenticate(db: MemoryDb, sid: string, password: string, now = Date.now()) {

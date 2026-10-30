@@ -26,15 +26,17 @@ const AVAIL = Object.keys(AVAILABILITY_LABEL) as Availability[];
 function Dashboard() {
   const { portal } = Route.useParams();
   const admin = useMemo(() => api.admin(`/${portal}`), [portal]);
-  const [state, setState] = useState<"checking" | "enrol" | "login" | "in" | "missing">("checking");
+  const [state, setState] = useState<"checking" | "enrol" | "login" | "mfa-setup" | "mfa-code" | "in" | "missing">("checking");
   const [roles, setRoles] = useState<string[]>([]);
   const [tab, setTab] = useState<Tab>("products");
 
-  const check = useCallback(async () => { const r = await admin.me(); if (r.ok && r.data) { setRoles(r.data.roles); setState("in"); } else setState(r.status === 401 || r.status === 404 ? "login" : "missing"); }, [admin]);
+  const check = useCallback(async () => { const r = await admin.me(); if (r.ok && r.data) { setRoles(r.data.roles); setState(r.data.mfa === "verified" ? "in" : r.data.mfa === "setup_required" ? "mfa-setup" : "mfa-code"); } else setState(r.status === 401 || r.status === 404 ? "login" : "missing"); }, [admin]);
   useEffect(() => { void check(); }, [check]);
 
   if (state === "checking") return <div className="container-x py-16"><Notice>Loading…</Notice></div>;
   if (state === "missing") return <div className="container-x py-16"><Notice>Page not found.</Notice></div>;
+  if (state === "mfa-setup") return <MfaSetup admin={admin} onDone={check} />;
+  if (state === "mfa-code") return <MfaCode admin={admin} onDone={check} />;
   if (state === "login" || state === "enrol") return <Gate admin={admin} mode={state} setMode={setState} onDone={check} />;
 
   return (
@@ -364,6 +366,7 @@ function StaffTab({ admin }: { admin: Admin }) {
           <div><p className="font-semibold">{m.email} <span className="badge-label ml-1">{m.state}</span></p><p className="text-muted-foreground">{m.roles.join(", ")}</p></div>
           {!m.roles.includes("owner") && <div className="flex gap-3">
             <button className="underline" onClick={() => editRoles(m)}>Change roles</button>
+            {m.state !== "invited" && <button className="underline" onClick={() => { if (window.confirm(`Reset two-step verification for ${m.email}? They will be signed out and must set it up again.`)) void run(() => admin.resetStaffMfa(m.id), "Two-step verification reset."); }}>Reset 2-step</button>}
             {m.state === "invited" ? <button className="underline" onClick={() => void run(() => admin.inviteStaff(m.email, m.roles), "New invitation issued.")}>Re-invite</button>
               : <button className="underline" onClick={() => void run(() => admin.setStaffActive(m.id, m.state !== "active"), m.state === "active" ? "Suspended." : "Reactivated.")}>{m.state === "active" ? "Suspend" : "Reactivate"}</button>}
           </div>}
@@ -406,6 +409,46 @@ function Quotes({ admin }: { admin: Admin }) {
               <button className="btn-primary sm:col-span-4">{q.quote ? "Send revised quote" : "Send quote"}</button></form>}
           </div>)}
         </li>))}{data && !data.length && <li className="py-3 text-muted-foreground">No quote requests yet.</li>}</ul>
+    </div>
+  );
+}
+
+function MfaSetup({ admin, onDone }: { admin: Admin; onDone: () => void }) {
+  const [info, setInfo] = useState<{ secret: string; otpauth: string } | null>(null); const [code, setCode] = useState(""); const [errors, setErrors] = useState<string[]>([]); const [codes, setCodes] = useState<string[] | null>(null);
+  useEffect(() => { void admin.mfaSetup().then((r) => (r.ok && r.data ? setInfo(r.data) : setErrors(r.errors))); }, [admin]);
+  if (codes) return (
+    <div className="container-x max-w-md py-16 space-y-4">
+      <h1 className="font-display text-2xl font-bold">Save your recovery codes</h1>
+      <Notice>Each code works once if you lose your phone. They are shown only now — store them somewhere safe (a password manager or printed copy).</Notice>
+      <ul className="grid grid-cols-2 gap-2 rounded-md bg-secondary p-4 font-mono text-sm">{codes.map((c) => <li key={c}>{c}</li>)}</ul>
+      <button className="btn-primary w-full" onClick={onDone}>I've saved them — continue</button>
+    </div>
+  );
+  return (
+    <div className="container-x max-w-md py-16">
+      <h1 className="font-display text-2xl font-bold">Set up two-step verification</h1>
+      <p className="mt-2 text-sm text-muted-foreground">Staff accounts require an authenticator app (Google Authenticator, Microsoft Authenticator, Authy, 1Password…).</p>
+      <form className="mt-6 space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); setErrors([]); void admin.mfaConfirm(code.trim()).then((r) => (r.ok && r.data ? setCodes(r.data.recoveryCodes) : setErrors(r.errors))); }}>
+        <Errors errors={errors} />
+        {info && <><p className="text-sm">1. In your app choose “Enter a setup key” and type this key (spaces don't matter):</p>
+          <code className="block break-all rounded bg-secondary p-3 text-sm" aria-label="Setup key">{info.secret.match(/.{1,4}/g)?.join(" ")}</code>
+          <p className="text-sm">2. Enter the 6-digit code it shows:</p></>}
+        <Field label="6-digit code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required value={code} onChange={(e) => setCode(e.target.value)} />
+        <button className="btn-primary w-full" disabled={!info}>Turn on two-step verification</button>
+      </form>
+    </div>
+  );
+}
+function MfaCode({ admin, onDone }: { admin: Admin; onDone: () => void }) {
+  const [code, setCode] = useState(""); const [errors, setErrors] = useState<string[]>([]);
+  return (
+    <div className="container-x max-w-md py-16">
+      <h1 className="font-display text-2xl font-bold">Enter your code</h1>
+      <form className="mt-6 space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); setErrors([]); void admin.mfaVerify(code.trim()).then((r) => { if (r.ok) onDone(); else { setCode(""); setErrors(r.status === 404 ? ["Too many wrong codes. Sign in again."] : r.errors); if (r.status === 404) setTimeout(() => window.location.reload(), 1500); } }); }}>
+        <Errors errors={errors} />
+        <Field label="6-digit code, or a recovery code" autoComplete="one-time-code" required hint="From your authenticator app. Recovery codes work once each." value={code} onChange={(e) => setCode(e.target.value)} />
+        <button className="btn-primary w-full">Verify</button>
+      </form>
     </div>
   );
 }

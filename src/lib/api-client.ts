@@ -66,7 +66,11 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     track: (ref: string, secret: string) => get<{ ref: string; status: string; history: { to: string; at: number }[]; hasPreorder: boolean }>(`/api/track?ref=${encodeURIComponent(ref)}&secret=${encodeURIComponent(secret)}`),
     admin: (portal: string) => ({
       enrol: (b: { reference: string; email: string; password: string }) => post<{ ok: true }>(`${portal}/api/enrol`, b),
-      me: () => get<{ id: string; roles: string[] }>(`${portal}/api/me`),
+      me: () => get<{ id: string; roles: string[]; mfa: "setup_required" | "code_required" | "verified" }>(`${portal}/api/me`),
+      mfaSetup: () => post<{ secret: string; otpauth: string }>(`${portal}/api/mfa/setup`),
+      mfaConfirm: (code: string) => post<{ recoveryCodes: string[] }>(`${portal}/api/mfa/confirm`, { code }),
+      mfaVerify: (code: string) => post<{ ok: true }>(`${portal}/api/mfa/verify`, { code }),
+      resetStaffMfa: (userId: string) => post(`${portal}/api/staff/mfa-reset`, { userId }),
       products: () => get<AdminProduct[]>(`${portal}/api/products`),
       createProduct: (b: Record<string, unknown>) => post<{ id: string; slug: string }>(`${portal}/api/products`, b),
       setStatus: (ids: string[], availability: Availability) => post(`${portal}/api/products/status`, { ids, availability }),

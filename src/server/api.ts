@@ -20,6 +20,7 @@ import { addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, u
 import { adminStoreFor, authenticate, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
 import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
 import { listQuotes, lookupQuote, requestQuote, respondToQuote, sendQuote } from "./services/quotes";
+import { confirmMfaSetup, mfaState, resetStaffMfa, startMfaSetup, verifyMfa } from "./services/mfa";
 import { acceptInvite, inviteStaff, listStaff, setStaffActive, setStaffRoles } from "./services/staff";
 import { listTickets, myTickets, openTicket, setTicketStatus, staffReply } from "./services/support";
 import { adjustStock, categoryAdmin, createProduct, setAvailability, setPrices, setPublishedState, ValidationError } from "./services/catalog-admin";
@@ -143,7 +144,19 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       const { actor, sid } = await who();
       if (!actor || actor.kind !== "staff") return notFound(); // unauthenticated probes learn nothing
       try {
-        if (sub === "/me" && req.method === "GET") return json({ id: actor.id, roles: actor.roles });
+        const mfa = await transact(p, (db) => mfaState(db, actor, sid!));
+        if (sub === "/me" && req.method === "GET") return json({ id: actor.id, roles: mfa === "verified" ? actor.roles : [], mfa });
+        if (sub === "/mfa/setup" && req.method === "POST") return json(await transact(p, (db) => startMfaSetup(db, actor)));
+        if (sub === "/mfa/confirm" && req.method === "POST") {
+          if (!limiters.auth.check(`mfa:${actor.id}`).allowed) return json({ error: "Too many attempts. Try again later." }, 429);
+          return json(await transact(p, (db) => confirmMfaSetup(db, actor, sid!, str(body, "code"))));
+        }
+        if (sub === "/mfa/verify" && req.method === "POST") {
+          if (!limiters.auth.check(`mfa:${actor.id}`).allowed) return json({ error: "Too many attempts. Try again later." }, 429);
+          return (await transact(p, (db) => verifyMfa(db, actor, sid!, str(body, "code")))) ? json({ ok: true }) : json({ error: "That code isn't right." }, 401);
+        }
+        if (mfa !== "verified") return json({ error: "Two-step verification required" }, 403); // nothing else is reachable until the second factor is proven
+        if (sub === "/staff/mfa-reset" && req.method === "POST") { await transact(p, (db) => resetStaffMfa(db, actor, str(body, "userId"))); return json({ ok: true }); }
         if (sub === "/products" && req.method === "GET") {
           requirePermission(actor, "product.read");
           return json(await transact(p, (db) => [...db.products.values()].map((pr) => {
