@@ -636,3 +636,35 @@ describe("payment methods: card, Mobile Money, bank transfer", () => {
   });
 });
 const fake2 = (log: { init?: unknown }): PaymentProvider => ({ name: "fakepay", methods: (c) => (c === "GHS" ? ["card", "mobile_money"] : ["card"]), initialize: async (i) => { log.init = i; return { ok: true, redirectUrl: "https://pay.example/session" }; }, parseWebhook: async (raw, h) => (h.get("x-sig") === "good" ? JSON.parse(raw) : null) });
+
+describe("pre-order allocation from received stock", () => {
+  test("paid pre-orders queue oldest-first; received stock allocates all-or-nothing and deducts inventory", async () => {
+    const { mk, admin, call, p } = await shop(fake2({}));
+    const pre = (await admin.createProduct({ name: "Drop", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "DROP", priceGhs: 20000, onHand: 0, published: true, availability: "pre_order", preOrderEnabled: true, expectedWindow: "Nov" })).data!;
+    const vid = `${pre.id}::DROP`;
+    const buy = async (qty: number, key: string) => { const c = mk(); const o = (await c.checkout({ lines: [{ variantId: vid, qty }], currency: "GHS", region: "Greater Accra", zoneId: "z", guestEmail: "g@x.com", address: { recipient: "R", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: key, acceptedTerms: true, preorderAcknowledged: true })).data!; return o; };
+    const pay = async (o: { order: { ref: string; total: number } }, id: string) => call("/api/webhooks/fakepay", { method: "POST", body: JSON.stringify({ eventId: id, orderRef: o.order.ref, amount: o.order.total, currency: "GHS", status: "success" }) }, { "x-sig": "good" });
+    const a = await buy(2, "pa"), b = await buy(2, "pb"), unpaid = await buy(1, "pc");
+    await pay(a, "ea"); await pay(b, "eb");
+    const q0 = (await admin.preorderQueue()).data!;
+    expect(q0.map((x) => x.ref)).toEqual([a.order.ref, b.order.ref]); // unpaid order isn't queued
+    expect(q0.every((x) => !x.canAllocate)).toBe(true);
+    expect((await admin.allocatePreorder((await admin.orders()).data!.find((x) => x.ref === a.order.ref)!.id)).errors[0]).toMatch(/0 free in stock, 2 needed/);
+    // stock arrives for only 3 units: the older order can be covered, the newer one can't
+    const sup = (await admin.saveSupplier({ name: "S" })).data!;
+    const po = (await admin.createPurchaseOrder({ supplierId: sup.id, currency: "USD", lines: [{ variantId: vid, qty: 3, unitCost: 100 }] })).data!;
+    await admin.setPurchaseOrderStatus(po.id, "ordered"); await admin.receivePurchaseOrder(po.id, [{ variantId: vid, qty: 3 }]);
+    const q1 = (await admin.preorderQueue()).data!;
+    expect(q1.map((x) => x.canAllocate)).toEqual([true, false]);
+    const ids = (await admin.orders()).data!; const idA = ids.find((x) => x.ref === a.order.ref)!.id, idB = ids.find((x) => x.ref === b.order.ref)!.id;
+    expect((await admin.allocatePreorder(idB)).errors[0]).toMatch(/Earlier pre-orders/); // 3 free but the older order has first claim
+    expect((await admin.allocatePreorder(idA)).ok).toBe(true);
+    expect((await admin.products()).data!.find((x) => x.sku === "DROP")!.onHand).toBe(1);
+    expect((await admin.allocatePreorder(idA)).errors[0]).toMatch(/no pre-order items/); // can't allocate twice
+    expect((await admin.allocatePreorder(idB)).errors[0]).toMatch(/only 1 free in stock, 2 needed/); // now genuinely short
+    expect((await admin.preorderQueue()).data!.map((x) => x.ref)).toEqual([b.order.ref]);
+    expect(await transact(p, (db) => db.audit.some((e) => e.event === "order.preorder_allocated"))).toBe(true);
+    expect((await mk().admin(PORTAL).preorderQueue()).status).toBe(404);
+    void unpaid;
+  });
+});

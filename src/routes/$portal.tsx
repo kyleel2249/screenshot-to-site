@@ -1,7 +1,7 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import { PAY_METHOD_LABELS, type AdminDiscount, type AdminOrder, type AdminProduct, type AdminZone, type AdminQuote, type AdminReview, type Analytics, type PurchaseOrder, type StaffMember, type Supplier, type Ticket } from "@/lib/api-client";
+import { PAY_METHOD_LABELS, type AdminDiscount, type AdminOrder, type AdminProduct, type AdminZone, type AdminQuote, type AdminReview, type Analytics, type PreorderQueueItem, type PurchaseOrder, type StaffMember, type Supplier, type Ticket } from "@/lib/api-client";
 import { childrenOf, topLevel, type CategoryNode } from "@/lib/domain/categories";
 import type { Section } from "@/lib/content";
 import { formatMoney } from "@/lib/domain/money";
@@ -522,12 +522,13 @@ function Purchasing({ admin }: { admin: Admin }) {
   const sup = useLoad<Supplier[]>(useCallback(() => admin.suppliers(), [admin]));
   const pos = useLoad<PurchaseOrder[]>(useCallback(() => admin.purchaseOrders(), [admin]));
   const prods = useLoad<AdminProduct[]>(useCallback(() => admin.products(), [admin]));
+  const queue = useLoad<PreorderQueueItem[]>(useCallback(() => admin.preorderQueue(), [admin]));
   const [errors, setErrors] = useState<string[]>([]);
   const [name, setName] = useState(""), [email, setEmail] = useState(""), [country, setCountry] = useState("");
   const [supplierId, setSupplierId] = useState(""), [currency, setCurrency] = useState("USD"), [expectedAt, setExpectedAt] = useState("");
   const [lines, setLines] = useState<{ variantId: string; qty: string; unitCost: string }[]>([{ variantId: "", qty: "", unitCost: "" }]);
   const [recv, setRecv] = useState<Record<string, string>>({});
-  const done = async (r: { ok: boolean; errors: string[] }) => { if (r.ok) { setErrors([]); await Promise.all([sup.reload(), pos.reload(), prods.reload()]); } else setErrors(r.errors); return r.ok; };
+  const done = async (r: { ok: boolean; errors: string[] }) => { if (r.ok) { setErrors([]); await Promise.all([sup.reload(), pos.reload(), prods.reload(), queue.reload()]); } else setErrors(r.errors); return r.ok; };
   const addSupplier = async () => { if (await done(await admin.saveSupplier({ name, email, country }))) { setName(""); setEmail(""); setCountry(""); } };
   const create = async () => {
     const parsed = lines.filter((l) => l.variantId).map((l) => ({ variantId: l.variantId, qty: Number(l.qty), unitCost: Math.round(Number(l.unitCost) * 100) }));
@@ -566,6 +567,15 @@ function Purchasing({ admin }: { admin: Admin }) {
             <input className={field} inputMode="decimal" placeholder="Unit cost" aria-label={`Line ${i + 1} unit cost`} value={l.unitCost} onChange={(e) => setLines(lines.map((x, j) => j === i ? { ...x, unitCost: e.target.value } : x))} />
           </div>))}
         <div className="flex gap-3"><button className="underline text-sm" onClick={() => setLines([...lines, { variantId: "", qty: "", unitCost: "" }])}>Add line</button><button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground" onClick={() => void create()}>Create order</button></div>
+      </section>
+      <section aria-labelledby="pq-h" className="space-y-3">
+        <h2 id="pq-h" className="text-lg font-semibold">Paid pre-orders waiting for stock</h2>
+        <p className="text-sm text-muted-foreground">Oldest first. When delivered stock covers an order, allocate it to move those items onto real inventory so it can be fulfilled. Later orders can't jump ahead of earlier ones.</p>
+        <ul className="divide-y divide-border text-sm">{queue.data?.map((q) => (
+          <li key={q.orderId} className="flex flex-wrap items-center justify-between gap-2 py-2">
+            <span>{q.ref} · {q.items.map((i) => `${i.qty}× ${i.name}`).join(", ")}</span>
+            <button className="underline disabled:opacity-50 disabled:no-underline" disabled={!q.canAllocate} onClick={() => void admin.allocatePreorder(q.orderId).then(done)}>{q.canAllocate ? "Allocate stock" : "Not enough stock yet"}</button>
+          </li>))}{queue.data && !queue.data.length && <li className="py-2 text-muted-foreground">No paid pre-orders are waiting.</li>}</ul>
       </section>
       <section aria-labelledby="pol-h" className="space-y-3">
         <h2 id="pol-h" className="text-lg font-semibold">Purchase orders</h2>

@@ -189,3 +189,37 @@ export function confirmBankTransfer(db: MemoryDb, actor: Actor | null, orderId: 
   db.log("payment.bank_transfer_confirmed", { orderId: o.id, result: r.kind }, actor!.id);
   return r.kind;
 }
+
+const PREORDER_OPEN: OrderStatus[] = ["payment_confirmed", "processing"];
+/** Paid orders still waiting on pre-order items, oldest first, with whether current free stock can cover each one. */
+export function preorderQueue(db: MemoryDb, actor: Actor | null) {
+  requirePermission(actor, "order.read");
+  const free = new Map<string, number>();
+  const out: { orderId: string; ref: string; paidAt: number; items: { variantId: string; name: string; qty: number }[]; canAllocate: boolean }[] = [];
+  const waiting = [...db.orders.values()].filter((o) => PREORDER_OPEN.includes(o.status) && o.items.some((i) => i.mode === "preorder")).sort((a, b) => a.createdAt - b.createdAt);
+  for (const o of waiting) {
+    const items = o.items.filter((i) => i.mode === "preorder");
+    let ok = true;
+    for (const i of items) { const v = db.variants.get(i.variantId); if (!free.has(i.variantId)) free.set(i.variantId, v ? v.onHand - v.reserved : 0); if ((free.get(i.variantId) ?? 0) < i.qty) ok = false; }
+    // Earlier orders get first claim on received stock: only count units for orders that can be fully covered.
+    if (ok) for (const i of items) free.set(i.variantId, (free.get(i.variantId) ?? 0) - i.qty);
+    out.push({ orderId: o.id, ref: o.ref, paidAt: o.history.find((h) => h.to === "payment_confirmed")?.at ?? o.createdAt, items: items.map((i) => ({ variantId: i.variantId, name: i.name, qty: i.qty })), canAllocate: ok });
+  }
+  return out;
+}
+/** Moves a paid order's pre-order items onto real stock once it has arrived. All-or-nothing; deducts inventory and audits. */
+export function allocatePreorder(db: MemoryDb, actor: Actor | null, orderId: string) {
+  requirePermission(actor, "order.update"); requirePermission(actor, "inventory.adjust");
+  const o = db.orders.get(orderId);
+  if (!o || !PREORDER_OPEN.includes(o.status)) throw new ValidationError(["Only a paid order that hasn't been dispatched can be allocated."]);
+  const items = o.items.filter((i) => i.mode === "preorder");
+  if (!items.length) throw new ValidationError(["This order has no pre-order items waiting."]);
+  const slot = preorderQueue(db, actor).find((q) => q.orderId === o.id);
+  if (slot && !slot.canAllocate && items.every((i) => { const v = db.variants.get(i.variantId); return !!v && v.onHand - v.reserved >= i.qty; })) throw new ValidationError(["Earlier pre-orders for the same item are still waiting. Allocate them first so stock goes out in the order it was paid."]);
+  const errors: string[] = [];
+  for (const i of items) { const v = db.variants.get(i.variantId); if (!v || v.onHand - v.reserved < i.qty) errors.push(`${i.name}: only ${Math.max(0, (v?.onHand ?? 0) - (v?.reserved ?? 0))} free in stock, ${i.qty} needed.`); }
+  if (errors.length) throw new ValidationError(errors);
+  for (const i of items) { const v = db.variants.get(i.variantId)!; v.onHand -= i.qty; if (v.preOrder) v.preOrder.sold = Math.max(0, (v.preOrder.sold ?? 0) - i.qty); i.mode = "stock"; }
+  o.hasPreorder = o.items.some((i) => i.mode === "preorder");
+  db.log("order.preorder_allocated", { orderId: o.id, ref: o.ref }, actor!.id);
+}

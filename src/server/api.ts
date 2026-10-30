@@ -28,7 +28,7 @@ import { confirmMfaSetup, mfaState, resetStaffMfa, startMfaSetup, verifyMfa } fr
 import { acceptInvite, inviteStaff, listStaff, setStaffActive, setStaffRoles } from "./services/staff";
 import { listTickets, myTickets, openTicket, setTicketStatus, staffReply } from "./services/support";
 import { adjustStock, categoryAdmin, createProduct, setAvailability, setPrices, setPublishedState, ValidationError } from "./services/catalog-admin";
-import { beginBankTransfer, completeRefund, confirmBankTransfer, getOrderForCustomer, handleVerifiedPayment, listOrdersForCustomer, orderForPayment, placeOrder, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "./services/orders";
+import { allocatePreorder, preorderQueue, beginBankTransfer, completeRefund, confirmBankTransfer, getOrderForCustomer, handleVerifiedPayment, listOrdersForCustomer, orderForPayment, placeOrder, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "./services/orders";
 import type { OrderStatus } from "../lib/domain/commerce";
 import type { Availability } from "../lib/domain/status";
 
@@ -198,6 +198,8 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
           return json(await transact(p, (db) => [...db.orders.values()].map((o) => ({ ...orderView(o), guestEmail: o.guestEmail ?? null, address: o.address, paymentMethod: o.paymentMethod ?? null }))));
         }
         if (sub === "/orders/status" && req.method === "POST") { await transact(p, (db) => staffUpdateStatus(db, actor, str(body, "orderId"), str(body, "to") as OrderStatus, str(body, "note") || undefined)); return json({ ok: true }); }
+        if (sub === "/preorder-queue" && req.method === "GET") return json(await transact(p, (db) => preorderQueue(db, actor)));
+        if (sub === "/orders/allocate-preorder" && req.method === "POST") { await transact(p, (db) => allocatePreorder(db, actor, str(body, "orderId"))); return json({ ok: true }); }
         if (sub === "/orders/confirm-bank-transfer" && req.method === "POST") { const kind = await transact(p, (db) => confirmBankTransfer(db, actor, str(body, "orderId"), num(body, "amount"), str(body, "reference"))); return json({ ok: true, result: kind }); }
         if (sub === "/refunds" && req.method === "POST") {
           const r = await transact(p, (db) => requestRefund(db, actor, str(body, "orderId"), num(body, "amount"))); return json(r);
