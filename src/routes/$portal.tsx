@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import type { AdminProduct } from "@/lib/api-client";
 import type { CategoryNode } from "@/lib/domain/categories";
-import { topLevel, childrenOf } from "@/lib/domain/categories";
+import { SEED_CATEGORIES, topLevel, childrenOf } from "@/lib/domain/categories";
 import { Notice, Field, inputCls, Errors } from "@/components/Form";
 
 export const Route = createFileRoute("/$portal")({
@@ -31,7 +31,7 @@ function Dashboard() {
   const [tab, setTab] = useState<Tab>("overview");
   const [roles, setRoles] = useState<string[]>(["owner"]);
   const [products, setProducts] = useState<AdminProduct[]>([]);
-  const [categories, setCategories] = useState<CategoryNode[]>([]);
+  const [categories, setCategories] = useState<CategoryNode[]>(() => SEED_CATEGORIES.map((c) => ({ ...c })));
   const [overview, setOverview] = useState<{ products: number; published: number; orders: number; categories: number } | null>(null);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
@@ -43,17 +43,24 @@ function Dashboard() {
     const me = await admin.me();
     if (me.ok && me.data?.roles?.length) setRoles(me.data.roles);
 
-    const [list, cats, ov] = await Promise.all([admin.products(), admin.categories(), admin.overview()]);
+    const [list, cats, ov, pubCats] = await Promise.all([
+      admin.products(),
+      admin.categories(),
+      admin.overview(),
+      api.categories(),
+    ]);
     if (list.ok && list.data) setProducts(list.data);
     else if (!list.ok) setError(list.errors.join(" ") || "Could not load products.");
-    if (cats.ok && cats.data) setCategories(cats.data);
+    if (cats.ok && cats.data && cats.data.length) setCategories(cats.data);
+    else if (pubCats.ok && pubCats.data && pubCats.data.length) setCategories(pubCats.data);
+    else setCategories(SEED_CATEGORIES.map((c) => ({ ...c })));
     if (ov.ok && ov.data) {
       const d = ov.data as { products?: number; published?: number; orders?: number; categories?: number };
       setOverview({
         products: d.products ?? 0,
         published: d.published ?? 0,
         orders: d.orders ?? 0,
-        categories: d.categories ?? 0,
+        categories: d.categories ?? categories.length,
       });
     }
     setLoading(false);
@@ -162,12 +169,7 @@ function Dashboard() {
               The catalogue is empty until you add products. Load sample items (with GHS/USD prices and images), then open the shop.
             </p>
             <div className="mt-4 flex flex-wrap gap-3">
-              <button
-                type="button"
-                disabled={busy}
-                className="btn-primary"
-                onClick={() => void seedSamples()}
-              >
+              <button type="button" disabled={busy} className="btn-primary" onClick={() => void seedSamples()}>
                 {busy ? "Working…" : "Load sample products"}
               </button>
               <button type="button" className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => setTab("add")}>
@@ -194,8 +196,8 @@ function Dashboard() {
             <ul className="mt-4 divide-y divide-border rounded-xl border border-border">
               {products.map((p) => (
                 <li key={p.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
-                  {p.image ? (
-                    <img src={p.image} alt="" className="h-12 w-12 rounded-md object-contain bg-secondary" />
+                  {"image" in p && (p as { image?: string }).image ? (
+                    <img src={(p as { image?: string }).image} alt="" className="h-12 w-12 rounded-md object-contain bg-secondary" />
                   ) : (
                     <div className="h-12 w-12 rounded-md bg-secondary" />
                   )}
@@ -263,6 +265,12 @@ function AddProductForm({
   busy: boolean;
   onSubmit: (body: Record<string, unknown>) => Promise<void>;
 }) {
+  const groups = useMemo(() => {
+    const tops = topLevel(categories);
+    if (tops.length) return tops;
+    return categories.filter((c) => !c.parentId);
+  }, [categories]);
+
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
   const [categoryId, setCategoryId] = useState("");
@@ -325,18 +333,26 @@ function AddProductForm({
           </label>
           <select id="cat" className={inputCls} value={categoryId} onChange={(e) => setCategoryId(e.target.value)} required>
             <option value="" disabled>
-              Choose…
+              Choose a category…
             </option>
-            {topLevel(categories).map((g) => (
-              <optgroup key={g.id} label={g.name}>
-                {[g, ...childrenOf(categories, g.id)].map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.id === g.id ? `${g.name} (general)` : c.name}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
+            {groups.map((g) => {
+              const kids = childrenOf(categories, g.id);
+              const leafs = kids.length ? kids : categories.filter((c) => c.parentId === g.id);
+              return (
+                <optgroup key={g.id} label={g.name}>
+                  <option value={g.id}>{g.name} (general)</option>
+                  {leafs.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </optgroup>
+              );
+            })}
           </select>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {categories.length ? `${categories.length} categories · ${groups.length} top-level groups` : "No categories loaded — refresh the page."}
+          </p>
         </div>
         <Field label="Price (GHS)" type="number" step="0.01" min="0" value={priceGhs} onChange={(e) => setPriceGhs(e.target.value)} />
         <Field label="Price (USD)" type="number" step="0.01" min="0" value={priceUsd} onChange={(e) => setPriceUsd(e.target.value)} />
