@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { api, newIdempotencyKey } from "@/lib/api";
-import { PAY_METHOD_LABELS, type ApiOrder, type BankTransferInstructions, type PayMethod } from "@/lib/api-client";
+import type { ApiOrder, PayMethod } from "@/lib/api-client";
+import { PayPanel } from "@/components/PayPanel";
 import { useCart } from "@/lib/cart";
 import { useCatalog } from "@/lib/catalog-store";
 import { estimate } from "@/lib/storefront";
@@ -28,9 +29,8 @@ function Checkout() {
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [zoneId, setZoneId] = useState(""); const [region, setRegion] = useState("");
   const [f, setF] = useState({ email: "", recipient: "", phone: "", city: "", street: "", code: "" });
-  const [method, setMethod] = useState<PayMethod | null>(null); const [bank, setBank] = useState<BankTransferInstructions | null>(null);
   const [terms, setTerms] = useState(false); const [pre, setPre] = useState(false);
-  const [errors, setErrors] = useState<string[]>([]); const [payErrors, setPayErrors] = useState<string[]>([]); const [paying, setPaying] = useState(false); const [busy, setBusy] = useState(false); const [placed, setPlaced] = useState<Placed | null>(null);
+  const [errors, setErrors] = useState<string[]>([]); const [busy, setBusy] = useState(false); const [placed, setPlaced] = useState<Placed | null>(null);
 
   useEffect(() => { void api.zones().then((r) => setZones(r.ok ? r.data : [])); void api.me().then((r) => setSignedIn(r.ok)); }, []);
   const zone = zones?.find((z) => z.id === zoneId);
@@ -58,30 +58,7 @@ function Checkout() {
           <p>Your order <strong>{o.ref}</strong> is reserved. Total: <strong>{formatMoney({ amount: o.total, currency: o.currency })}</strong>.</p>
           <p className="mt-2">{placed.paymentAvailable ? "Your items are reserved for a limited time. Complete payment to confirm your order." : "Online payment is not available yet, so the business will contact you to arrange payment. Reserved items are held for a limited time."}</p>
         </Notice>
-        {placed.paymentAvailable && (
-          <div className="space-y-3"><Errors errors={payErrors} />
-            <fieldset className="space-y-2"><legend className="text-sm font-semibold">How would you like to pay?</legend>
-              {placed.methods.map((m) => (
-                <label key={m} className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3 text-sm has-[:checked]:border-primary">
-                  <input type="radio" name="pay-method" className="mt-1" checked={(method ?? placed.methods[0]) === m} onChange={() => setMethod(m)} />
-                  <span><span className="font-medium">{PAY_METHOD_LABELS[m]}</span><span className="block text-muted-foreground">{m === "card" ? "Visa or Mastercard, on our payment partner's secure page." : m === "mobile_money" ? "Approve the payment on your phone (MTN, Telecel or AirtelTigo). Ghana cedi orders only." : "Pay from your bank to our account. We confirm once the money arrives, then process your order."}</span></span>
-                </label>))}
-            </fieldset>
-            <button className="btn-primary w-full" disabled={paying} onClick={() => {
-              const chosen = method ?? placed.methods[0]; if (!chosen) return;
-              setPaying(true); setPayErrors([]);
-              if (chosen === "bank_transfer") { void api.startBankTransfer(o.ref, placed.trackingSecret).then((r) => { setPaying(false); if (r.ok && r.data) setBank(r.data); else setPayErrors(r.errors); }); return; }
-              void api.startPayment(o.ref, placed.trackingSecret, chosen).then((r) => { if (r.ok && r.data) window.location.assign(r.data.redirectUrl); else { setPaying(false); setPayErrors(r.errors); } });
-            }}>{paying ? "Please wait…" : (method ?? placed.methods[0]) === "bank_transfer" ? "Show bank details" : `Pay ${formatMoney({ amount: o.total, currency: o.currency })} now`}</button>
-            <p className="text-xs text-muted-foreground">Card and Mobile Money payments happen on our payment partner's secure page. We never see or store your card details or Mobile Money PIN.</p>
-            {bank && (
-              <div className="rounded-md border border-border p-4 text-sm" role="status">
-                <p className="font-semibold">Pay {formatMoney({ amount: bank.amount, currency: bank.currency })} by bank transfer</p>
-                <pre className="mt-2 whitespace-pre-wrap rounded bg-secondary p-2 font-sans">{bank.instructions}</pre>
-                <p className="mt-2">Use <strong>{bank.reference}</strong> as the payment reference so we can match it. Your items are held until {new Date(bank.holdUntil).toLocaleString()}.</p>
-              </div>)}
-          </div>
-        )}
+        {placed.paymentAvailable && <PayPanel orderRef={o.ref} trackingSecret={placed.trackingSecret} total={o.total} currency={o.currency} payBy={o.payBy} methods={placed.methods} />}
         {placed.trackingSecret && (
           <div className="rounded-md border border-border p-4 text-sm">
             <p className="font-semibold">Save your tracking code — it is shown only once.</p>

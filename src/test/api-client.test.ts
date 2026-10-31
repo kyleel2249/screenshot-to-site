@@ -896,3 +896,24 @@ describe("dashboard overview", () => {
     expect((await mk().admin(PORTAL).overview()).status).toBe(404);
   });
 });
+
+describe("resuming payment after leaving checkout", () => {
+  test("tracking shows what is payable and until when; case-insensitive reference; bank hold is extended only once; paid orders stop being payable", async () => {
+    const { mk, order, call } = await shop(fake2({}), { BANK_TRANSFER_DETAILS: "Bank X", BANK_TRANSFER_HOLD_HOURS: "24" });
+    const c = mk(); const o = await order(c);
+    const t1 = (await mk().track(o.order.ref.toLowerCase(), o.trackingSecret!)).data!;
+    expect(t1).toMatchObject({ ref: o.order.ref, status: "pending_payment", currency: "GHS", total: o.order.total, paymentMethod: null }); expect(t1.payBy).toBeGreaterThan(Date.now());
+    expect((await mk().track(o.order.ref, "wrong")).status).toBe(404);
+    const first = (await c.startBankTransfer(o.order.ref, o.trackingSecret)).data!; expect(first.holdUntil).toBeGreaterThan(Date.now() + 23 * 3_600_000);
+    const again = (await c.startBankTransfer(o.order.ref, o.trackingSecret)).data!; expect(again.holdUntil).toBe(first.holdUntil); // re-opening can't extend the hold
+    expect((await mk().track(o.order.ref, o.trackingSecret!)).data).toMatchObject({ paymentMethod: "bank_transfer", payBy: first.holdUntil });
+    await call("/api/webhooks/fakepay", { method: "POST", body: JSON.stringify({ eventId: "rp1", orderRef: o.order.ref, amount: o.order.total, currency: "GHS", status: "success" }) }, { "x-sig": "good" });
+    expect((await mk().track(o.order.ref, o.trackingSecret!)).data!.payBy).toBeNull();
+  });
+  test("a signed-in customer's own order list marks unpaid orders payable", async () => {
+    const { mk } = await shop(fake2({}));
+    const c = mk(); await c.register({ email: "pay@w.com", password: PW, firstName: "A", lastName: "B", acceptTerms: true }); await c.login("pay@w.com", PW);
+    const placed = (await c.checkout({ lines: [{ variantId: (await c.products()).data![0]!.variantId, qty: 1 }], currency: "GHS", region: "Greater Accra", zoneId: "z", address: { recipient: "A", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: "pay-1", acceptedTerms: true })).data!;
+    const list = (await c.orders()).data!; expect(list[0]).toMatchObject({ ref: placed.order.ref, status: "pending_payment" }); expect(list[0]!.payBy).toBeGreaterThan(Date.now());
+  });
+});

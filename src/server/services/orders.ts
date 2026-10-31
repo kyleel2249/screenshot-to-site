@@ -102,12 +102,13 @@ export function getOrderForCustomer(db: MemoryDb, actor: Actor | null, orderId: 
 }
 export const listOrdersForCustomer = (db: MemoryDb, actor: Actor | null) => actor ? [...db.orders.values()].filter((o) => o.userId === actor.id) : [];
 
-export async function trackOrder(db: MemoryDb, ref: string, secret: string) {
-  const o = [...db.orders.values()].find((x) => x.ref === ref);
+export async function trackOrder(db: MemoryDb, ref: string, secret: string, now = Date.now()) {
+  const wanted = ref.trim().toUpperCase();
+  const o = [...db.orders.values()].find((x) => x.ref === wanted);
   const ok = !!o && timingSafeEqual(await sha256Hex(secret), o.trackingSecretHash);
   if (!ok || !o) return null;
   // Deliberately omits address, email, payment details.
-  return { ref: o.ref, status: o.status, history: o.history.map((h) => ({ to: h.to, at: h.at })), hasPreorder: o.hasPreorder };
+  return { ref: o.ref, status: o.status, history: o.history.map((h) => ({ to: h.to, at: h.at })), hasPreorder: o.hasPreorder, currency: o.currency, total: o.total, paymentMethod: o.paymentMethod ?? null, payBy: o.status === "pending_payment" && o.reservedUntil > now ? o.reservedUntil : null };
 }
 
 export function requestCancellation(db: MemoryDb, actor: Actor | null, orderId: string, now = Date.now()) {
@@ -165,7 +166,7 @@ export async function beginBankTransfer(db: MemoryDb, actor: Actor | null, ref: 
   if (!found || "error" in found) return found;
   const o = found.order, hours = Math.min(72, Math.max(1, Math.floor(holdHours) || 24));
   o.paymentMethod = "bank_transfer";
-  o.reservedUntil = Math.max(o.reservedUntil, now + hours * 3_600_000);
+  if (!o.bankTransfer) o.reservedUntil = Math.max(o.reservedUntil, now + hours * 3_600_000); // extend once only: re-opening the instructions must not hold stock forever
   o.bankTransfer = { startedAt: o.bankTransfer?.startedAt ?? now };
   db.log("payment.bank_transfer_started", { orderId: o.id });
   return { order: o };

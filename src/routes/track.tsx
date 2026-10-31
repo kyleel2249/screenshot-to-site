@@ -3,6 +3,8 @@ import { useState } from "react";
 import { api } from "@/lib/api";
 import { Errors, Field, Page } from "@/components/Form";
 import { labelOf } from "@/lib/order-labels";
+import { PayPanel } from "@/components/PayPanel";
+import type { TrackResult } from "@/lib/api-client";
 
 export const Route = createFileRoute("/track")({
   validateSearch: (s: Record<string, unknown>) => ({ ref: typeof s["ref"] === "string" ? s["ref"] : "" }),
@@ -12,7 +14,7 @@ export const Route = createFileRoute("/track")({
 function Track() {
   const s = Route.useSearch();
   const [ref, setRef] = useState(s.ref); const [secret, setSecret] = useState("");
-  const [res, setRes] = useState<{ status: string; history: { to: string; at: number }[]; hasPreorder: boolean } | null>(null); const [errors, setErrors] = useState<string[]>([]);
+  const [res, setRes] = useState<TrackResult | null>(null); const [errors, setErrors] = useState<string[]>([]);
   async function go(e: React.FormEvent) {
     e.preventDefault(); setErrors([]); setRes(null);
     const r = await api.track(ref.trim(), secret.trim());
@@ -30,6 +32,7 @@ function Track() {
         <section aria-live="polite" className="card-elevated p-5">
           <p className="font-semibold">Status: {labelOf(res.status)}</p>
           {res.hasPreorder && <p className="mt-1 text-sm text-muted-foreground">Contains pre-order items; dates are estimates.</p>}
+          {res.payBy !== null && <div className="mt-4 border-t border-border pt-4"><PayPanel orderRef={res.ref} trackingSecret={secret.trim()} total={res.total} currency={res.currency} payBy={res.payBy} /></div>}
           <ol className="mt-3 space-y-1 text-sm">{res.history.map((h) => <li key={`${h.to}${h.at}`}>{new Date(h.at).toLocaleString()} — {labelOf(h.to)}</li>)}</ol>
         </section>
       )}

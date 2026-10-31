@@ -1,3 +1,4 @@
+import { PayPanel } from "@/components/PayPanel";
 import { useCart } from "@/lib/cart";
 import { WishlistButton } from "@/components/WishlistButton";
 import { useCatalog } from "@/lib/catalog-store";
@@ -85,6 +86,7 @@ function Account() {
           <li key={o.id} className="flex flex-wrap items-center justify-between gap-3 py-3 text-sm">
             <div><p className="font-semibold">{o.ref} · {labelOf(o.status)}</p><p className="text-muted-foreground">{new Date(o.createdAt).toLocaleDateString()} · {o.items.map((i) => `${i.qty}× ${i.name}`).join(", ")}</p></div>
             <div className="flex items-center gap-3"><span className="font-semibold">{formatMoney({ amount: o.total, currency: o.currency })}</span>
+              {o.payBy !== null && <details className="mt-2"><summary className="cursor-pointer font-medium underline">Pay now</summary><div className="mt-2"><PayPanel orderRef={o.ref} total={o.total} currency={o.currency} payBy={o.payBy} /></div></details>}
               {["pending_payment", "payment_confirmed", "processing"].includes(o.status) && <button className="underline" onClick={() => void run(() => api.cancelOrder(o.id), "Cancellation requested.")}>Request cancellation</button>}</div>
           </li>))}{!orders.length && <li className="py-3 text-muted-foreground">No orders yet.</li>}</ul>
       </section>

@@ -15,9 +15,10 @@ export interface ApiProduct {
   variantId: string; remaining?: number; expectedWindow?: string | null; attributes: Record<string, string>;
 }
 export interface ApiOrder {
-  id: string; ref: string; status: string; currency: Currency; subtotal: number; discount: number; shipping: number; total: number; hasPreorder: boolean; createdAt: number;
+  id: string; ref: string; status: string; currency: Currency; subtotal: number; discount: number; shipping: number; total: number; hasPreorder: boolean; createdAt: number; payBy: number | null; paymentMethod: PayMethod | null;
   items: { name: string; qty: number; unit: number; line: number; mode: string }[]; history: { to: string; at: number }[];
 }
+export interface TrackResult { ref: string; status: string; history: { to: string; at: number }[]; hasPreorder: boolean; currency: Currency; total: number; paymentMethod: PayMethod | null; payBy: number | null }
 export interface ApiResult<T> { ok: boolean; status: number; data: T | null; errors: string[] }
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -78,7 +79,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     paymentConfig: () => get<{ enabled: boolean; provider?: string; methods: Record<"GHS" | "USD", PayMethod[]> }>("/api/payments/config"),
     startPayment: (orderRef: string, trackingSecret?: string, method?: PayMethod) => post<{ redirectUrl: string }>("/api/payments/start", { orderRef, ...(trackingSecret ? { trackingSecret } : {}), ...(method ? { method } : {}) }),
     startBankTransfer: (orderRef: string, trackingSecret?: string) => post<BankTransferInstructions>("/api/payments/bank-transfer", { orderRef, ...(trackingSecret ? { trackingSecret } : {}) }),
-    track: (ref: string, secret: string) => get<{ ref: string; status: string; history: { to: string; at: number }[]; hasPreorder: boolean }>(`/api/track?ref=${encodeURIComponent(ref)}&secret=${encodeURIComponent(secret)}`),
+    track: (ref: string, secret: string) => get<TrackResult>(`/api/track?ref=${encodeURIComponent(ref)}&secret=${encodeURIComponent(secret)}`),
     admin: (portal: string) => ({
       enrol: (b: { reference: string; email: string; password: string }) => post<{ ok: true }>(`${portal}/api/enrol`, b),
       me: () => get<{ id: string; roles: string[]; mfa: "setup_required" | "code_required" | "verified" }>(`${portal}/api/me`),
