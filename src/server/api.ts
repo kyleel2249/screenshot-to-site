@@ -1,6 +1,6 @@
 /**
  * TEMP open-access API: admin dashboard needs no login.
- * Supports catalogue list/create/publish/seed so the dashboard is usable.
+ * Supports catalogue list/create/publish/seed + product image upload.
  */
 import { STAFF_OPEN_ACCESS } from "../lib/security/open-access";
 import { resolvePortalPath } from "../lib/security/enrolment";
@@ -10,6 +10,7 @@ import type { Persistence } from "./persistence/transact";
 import { transact } from "./persistence/transact";
 import { requirePermission } from "./rbac";
 import type { R2Like } from "./media";
+import { storeImage, serveImage, MEDIA_MAX_BYTES, sniffImage } from "./media";
 import { openAccessActor } from "./open-access-actor";
 import { createProduct, setPublishedState, ValidationError } from "./services/catalog-admin";
 
@@ -89,8 +90,19 @@ export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const portal = resolvePortalPath(env) ?? (STAFF_OPEN_ACCESS ? "/dera-owner-console" : null);
+
+  const mediaMatch = path.match(/^\/media\/([a-f0-9]{32}\.(?:jpg|png|webp|gif))$/i);
+  if (mediaMatch && req.method === "GET") {
+    return serveImage(env.MEDIA, mediaMatch[1]!);
+  }
+
   let body: Record<string, unknown> = {};
-  if (req.method !== "GET" && req.method !== "HEAD") {
+  const isMediaUpload =
+    STAFF_OPEN_ACCESS &&
+    portal &&
+    path === `${portal}/api/media` &&
+    req.method === "POST";
+  if (!isMediaUpload && req.method !== "GET" && req.method !== "HEAD") {
     try { body = (await req.json()) as Record<string, unknown>; } catch { body = {}; }
   }
 
@@ -151,6 +163,28 @@ export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps
       if (sub === "/products/publish" && req.method === "POST") {
         await transact(p, (db) => setPublishedState(db, actor, String(body.productId ?? ""), body.published === true));
         return json({ ok: true });
+      }
+      if (sub === "/media" && req.method === "POST") {
+        requirePermission(actor, "product.write");
+        const data = await req.arrayBuffer();
+        if (env.MEDIA) {
+          const result = await storeImage(env.MEDIA, data);
+          if ("error" in result) return json({ error: result.error, errors: [result.error] }, 400);
+          return json({ url: result.url });
+        }
+        if (data.byteLength > MEDIA_MAX_BYTES) {
+          return json({ error: "Image too large and MEDIA (R2) is not configured.", errors: ["Image too large and MEDIA (R2) is not configured."] }, 400);
+        }
+        const bytes = new Uint8Array(data);
+        const kind = sniffImage(bytes);
+        if (!kind) return json({ error: "Only JPEG, PNG, WebP or GIF images can be uploaded.", errors: ["Only JPEG, PNG, WebP or GIF images can be uploaded."] }, 400);
+        let binary = "";
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+        }
+        const b64 = btoa(binary);
+        return json({ url: `data:${kind.type};base64,${b64}` });
       }
       if (sub === "/products/seed" && req.method === "POST") {
         const created = await transact(p, (db) => {
