@@ -1,96 +1,90 @@
 {
   "generatedAt": "2026-10-31",
+  "ownerPolicy": {
+    "useAiAsProductImages": true,
+    "showCustomerFacingAiNotice": false,
+    "internalTrackingOnly": true,
+    "replaceWithRealPhotosWhenAvailable": true
+  },
+  "masterFolderId": "FAHZmugXN_k",
+  "masterFolderUrl": "https://www.canva.com/folder/FAHZmugXN_k",
   "creditsExhausted": true,
   "items": [
     {
       "sku": "DDT-029",
       "name": "Classic White Sneakers",
-      "canvaMediaId": "MAHZmgrCBeA",
-      "targetCanvaFolderId": "FAHZmW1FAsk",
-      "kind": "illustrative",
-      "status": "generated_in_canva_awaiting_export",
+      "targetCanvaFolderId": "FAHZmmQYZ7U",
+      "kind": "ai_placeholder",
+      "customerVisibleAs": "product_image",
+      "status": "generation_job_started",
       "siteFile": "public/products/DDT-029.png",
-      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+      "note": "Replace public tile with Canva export when ready; no customer-facing AI label."
     },
     {
       "sku": "DDT-010",
       "name": "Leather-Look Tote Bag",
-      "canvaMediaId": "MAHZmsM74jM",
-      "targetCanvaFolderId": "FAHZmanHmGw",
-      "kind": "illustrative",
-      "status": "generated_in_canva_awaiting_export",
+      "targetCanvaFolderId": "FAHZmic4XbE",
+      "kind": "ai_placeholder",
+      "customerVisibleAs": "product_image",
+      "status": "generation_job_started",
       "siteFile": "public/products/DDT-010.png",
-      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+      "note": "Replace public tile with Canva export when ready; no customer-facing AI label."
     },
     {
       "sku": "DDT-054",
       "name": "Everyday Backpack",
-      "canvaMediaId": "MAHZmuROYX8",
-      "targetCanvaFolderId": "FAHZmQeN8bU",
-      "kind": "illustrative",
-      "status": "generated_in_canva_awaiting_export",
+      "targetCanvaFolderId": "FAHZmuF5mMY",
+      "kind": "ai_placeholder",
+      "customerVisibleAs": "product_image",
+      "status": "generation_job_started",
       "siteFile": "public/products/DDT-054.png",
-      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+      "note": "Replace public tile with Canva export when ready; no customer-facing AI label."
     },
     {
       "sku": "DDT-037",
       "name": "Portable Power Bank",
-      "canvaMediaId": "MAHZmkWtDYg",
-      "targetCanvaFolderId": "FAHZmee15z8",
-      "kind": "illustrative",
-      "status": "generated_in_canva_awaiting_export",
+      "targetCanvaFolderId": "FAHZmuwbN88",
+      "kind": "ai_placeholder",
+      "customerVisibleAs": "product_image",
+      "status": "generation_job_started",
       "siteFile": "public/products/DDT-037.png",
-      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+      "note": "Replace public tile with Canva export when ready; no customer-facing AI label."
     },
     {
       "sku": "DDT-038",
       "name": "Smart Watch",
-      "canvaMediaId": "MAHZmtjmXpA",
-      "targetCanvaFolderId": "FAHZmee15z8",
-      "kind": "illustrative",
-      "status": "generated_in_canva_awaiting_export",
+      "targetCanvaFolderId": "FAHZmuwbN88",
+      "kind": "ai_placeholder",
+      "customerVisibleAs": "product_image",
+      "status": "generation_job_started",
       "siteFile": "public/products/DDT-038.png",
-      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+      "note": "Replace public tile with Canva export when ready; no customer-facing AI label."
     },
     {
       "sku": "DDT-044",
       "name": "Gold-Tone Chain Necklace",
-      "canvaMediaId": "MAHZmhl2vfw",
-      "targetCanvaFolderId": "FAHZmTCtsUo",
-      "kind": "illustrative",
-      "status": "generated_in_canva_awaiting_export",
+      "targetCanvaFolderId": "FAHZmrQ_dMA",
+      "kind": "ai_placeholder",
+      "customerVisibleAs": "product_image",
+      "status": "generation_job_started",
       "siteFile": "public/products/DDT-044.png",
-      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+      "note": "Replace public tile with Canva export when ready; no customer-facing AI label."
     },
     {
       "sku": "DDT-045",
       "name": "Hoop Earrings",
-      "canvaMediaId": "MAHZmiG0jvg",
-      "targetCanvaFolderId": "FAHZmTCtsUo",
-      "kind": "illustrative",
-      "status": "generated_in_canva_awaiting_export",
+      "targetCanvaFolderId": "FAHZmrQ_dMA",
+      "kind": "ai_placeholder",
+      "customerVisibleAs": "product_image",
+      "status": "generation_job_started",
       "siteFile": "public/products/DDT-045.png",
-      "note": "Placeholder tile is live on the site until the exported image replaces the file."
-    },
-    {
-      "sku": "DDT-074",
-      "name": "Eau de Parfum",
-      "canvaMediaId": "MAHZmlJjK9A",
-      "targetCanvaFolderId": "FAHZmVXMoWw",
-      "kind": "illustrative",
-      "status": "generated_in_canva_awaiting_export",
-      "siteFile": "public/products/DDT-074.png",
-      "note": "Placeholder tile is live on the site until the exported image replaces the file."
-    },
-    {
-      "sku": "DDT-012",
-      "name": "Straight Bob Wig",
-      "canvaMediaId": "MAHZmjIecOE",
-      "targetCanvaFolderId": "FAHZmanHmGw",
-      "kind": "illustrative",
-      "status": "generated_in_canva_awaiting_export",
-      "siteFile": "public/products/DDT-012.png",
-      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+      "note": "Replace public tile with Canva export when ready; no customer-facing AI label."
     }
+  ],
+  "skippedForSafety": [
+    "Vehicles (Cars)",
+    "Medical equipment",
+    "Teas / gummies / supplements",
+    "Building materials & fixtures"
   ]
 }
