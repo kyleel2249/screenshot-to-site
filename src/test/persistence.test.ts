@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { SEED_CATEGORIES } from "../lib/domain/categories";
 import { MemoryDb } from "../server/db";
 import { deserialize, serialize } from "../server/persistence/serialize";
-import { D1Persistence, type D1Like } from "../server/persistence/sql";
+import { CHUNK_SIZE, D1Persistence, INLINE_MAX, ORPHAN_AGE_MS, type D1Like } from "../server/persistence/sql";
 import { ConflictError, MemoryPersistence, transact, type Persistence } from "../server/persistence/transact";
 import { createProduct } from "../server/services/catalog-admin";
 import { placeOrder } from "../server/services/orders";
@@ -12,12 +12,12 @@ import type { Actor } from "../server/rbac";
 const owner: Actor = { id: "s1", kind: "staff", roles: ["owner"], recentAuthAt: Date.now() };
 const addr = { recipient: "R", region: "Greater Accra", city: "Accra", street: "1 St" };
 
-function fakeD1(): D1Like {
-  const sqlite = new Database(":memory:");
+function fakeD1(sqlite = new Database(":memory:")): D1Like {
   return {
     exec: async (sql) => { sqlite.exec(sql); },
     prepare: (sql) => ({ bind: (...v) => ({
       first: async <T,>() => (sqlite.query(sql).get(...(v as never[])) as T | null) ?? null,
+      all: async <T,>() => ({ results: sqlite.query(sql).all(...(v as never[])) as T[] }),
       run: async () => { const r = sqlite.query(sql).run(...(v as never[])); return { meta: { changes: r.changes } }; },
     }) }),
   };
@@ -77,4 +77,48 @@ test("stale writer loses compare-and-swap; persistent conflicts surface as Confl
   expect(await p.save('{"a":2}', 1)).toBe(false); // stale version
   const always: Persistence = { load: async () => ({ json: null, version: 0 }), save: async () => false };
   await expect(transact(always, (db) => { db.settings["k"] = "v"; }, 2)).rejects.toBeInstanceOf(ConflictError);
+});
+
+describe("large state is chunked under the D1 row limit", () => {
+  const big = (n: number) => JSON.stringify({ pad: "x".repeat(n) });
+  const rows = (sq: Database) => (sq.query("SELECT COUNT(*) AS n FROM app_state_chunks").get() as { n: number }).n;
+  test("small state stays inline; large state round-trips across chunks; shrinking cleans the old chunks", async () => {
+    const sq = new Database(":memory:"); const p = new D1Persistence(fakeD1(sq));
+    expect(await p.save(big(1000), 0)).toBe(true); expect(rows(sq)).toBe(0); expect((await p.load()).json).toBe(big(1000));
+    const huge = big(INLINE_MAX * 3 + 123); // ~2.1 MB, which a single D1 row could not hold
+    expect(await p.save(huge, 1)).toBe(true); const l = await p.load(); expect(l.json).toBe(huge); expect(l.version).toBe(2);
+    expect(rows(sq)).toBe(Math.ceil(huge.length / CHUNK_SIZE)); expect((sq.query("SELECT MAX(LENGTH(data)) AS m FROM app_state_chunks").get() as { m: number }).m).toBeLessThanOrEqual(CHUNK_SIZE);
+    const huge2 = big(INLINE_MAX * 2); expect(await p.save(huge2, 2)).toBe(true); expect((await p.load()).json).toBe(huge2); expect(rows(sq)).toBe(Math.ceil(huge2.length / CHUNK_SIZE)); // old generation removed
+    expect(await p.save(big(10), 3)).toBe(true); expect(rows(sq)).toBe(0); expect((await p.load()).json).toBe(big(10)); // back to inline
+  });
+  test("first write of large state works; a lost race leaves no orphan chunks and the winner's state intact", async () => {
+    const sq = new Database(":memory:"); const a = new D1Persistence(fakeD1(sq)), b = new D1Persistence(fakeD1(sq));
+    const A = big(INLINE_MAX * 2), B = big(INLINE_MAX * 2 + 7);
+    expect(await a.save(A, 0)).toBe(true);
+    expect(await b.save(B, 0)).toBe(false); // someone else created it first
+    expect(await b.save(B, 1)).toBe(true); expect(await a.save(A, 1)).toBe(false); // stale writer loses
+    expect((await a.load()).json).toBe(B); expect(rows(sq)).toBe(Math.ceil(B.length / CHUNK_SIZE));
+  });
+  test("a crashed write's unreferenced chunks are removed by cleanup — but only once they are old enough", async () => {
+    const sq = new Database(":memory:"); const p = new D1Persistence(fakeD1(sq));
+    await p.save(big(INLINE_MAX * 2), 0); const live = rows(sq);
+    const now = Date.now(); sq.run("INSERT INTO app_state_chunks (token, idx, data, at) VALUES ('ghost', 0, 'x', ?)", [now]); // an in-flight write from another Worker
+    expect(await p.cleanup(now + 1000)).toBe(0); expect(rows(sq)).toBe(live + 1); // too recent: leave it alone
+    expect(await p.cleanup(now + ORPHAN_AGE_MS + 1)).toBe(1); expect(rows(sq)).toBe(live);
+    expect((await p.load()).json).toBe(big(INLINE_MAX * 2)); // live data untouched
+  });
+  test("a reader that races a commit never returns a half-written state", async () => {
+    const sq = new Database(":memory:"); const w = new D1Persistence(fakeD1(sq)), r = new D1Persistence(fakeD1(sq));
+    let v = 0; const gens = [big(INLINE_MAX * 2 + 1), big(INLINE_MAX * 2 + 2), big(INLINE_MAX * 2 + 3)];
+    const writer = (async () => { for (const g of gens) { await w.save(g, v); v++; } })();
+    const seen: string[] = []; for (let i = 0; i < 12; i++) { const l = await r.load(); if (l.json) seen.push(l.json); }
+    await writer; for (const j of seen) expect(gens).toContain(j);
+  });
+  test("transact works end to end on a state that outgrows one row", async () => {
+    const sq = new Database(":memory:"); const p = new D1Persistence(fakeD1(sq));
+    await transact(p, (db) => { for (let i = 0; i < 3000; i++) db.settings[`k${i}`] = "v".repeat(300); });
+    expect(rows(sq)).toBeGreaterThan(1);
+    expect(await transact(p, (db) => Object.keys(db.settings).length)).toBe(3001); // 3000 + displayMode
+    await transact(p, (db) => { db.settings["extra"] = "1"; }); expect(await transact(p, (db) => db.settings["extra"])).toBe("1");
+  });
 });

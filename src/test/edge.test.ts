@@ -142,7 +142,7 @@ describe("maintenance endpoint", () => {
     const KEY = "k".repeat(32), on = { ...env, MAINTENANCE_KEY: KEY };
     expect((await route(post(), on, p, ssr)).status).toBe(404); expect((await route(post("wrong".repeat(8)), on, p, ssr)).status).toBe(404);
     expect((await route(new Request(`${ORIGIN}/api/maintenance`, { headers: { "x-maintenance-key": KEY } }), on, p, ssr)).status).not.toBe(200); // GET isn't allowed
-    const ok = await route(post(KEY), on, p, ssr); expect(ok.status).toBe(200); expect(await ok.json()).toEqual({ released: 0, sessions: 0, tokens: 0 }); expect(ok.headers.get("cache-control")).toBe("private, no-store");
+    const ok = await route(post(KEY), on, p, ssr); expect(ok.status).toBe(200); expect(await ok.json()).toEqual({ released: 0, sessions: 0, tokens: 0, orphanRows: 0 }); expect(ok.headers.get("cache-control")).toBe("private, no-store");
     expect((await route(post("short"), { ...env, MAINTENANCE_KEY: "short" }, p, ssr)).status).toBe(404); // weak keys are refused outright
   });
 });

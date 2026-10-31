@@ -8,6 +8,8 @@ import { deserialize, serialize } from "./serialize";
 export interface Persistence {
   load(): Promise<{ json: string | null; version: number }>;
   save(json: string, expectedVersion: number): Promise<boolean>;
+  /** Optional housekeeping for backends that can leave debris after a crash; returns rows removed. */
+  cleanup?(now?: number): Promise<number>;
 }
 
 export class ConflictError extends Error { constructor() { super("Too many concurrent updates, please retry."); this.name = "ConflictError"; } }

@@ -13,8 +13,10 @@ wrangler d1 create dera-darko-trade
 ```
 Bind it as `DB`. `D1Persistence` creates its `app_state` table automatically and commits with compare-and-swap + retry, so concurrent
 checkouts cannot oversell (verified in `src/test/persistence.test.ts`).
-**Scale note:** the current adapter stores the whole application state as one versioned document. It is correct and safe for a small shop
-but grows linearly; the normalised schema in `db/migrations/0001_init.sql` is the migration target when the catalogue/order volume grows.
+**Scale note:** the adapter stores the whole application state as one versioned document. D1 rejects rows over ~2 MB, so once the document passes ~700 KB it is
+automatically split into ~400 KB chunk rows (written first, then switched in by the same compare-and-swap, so readers never see a half-written state; leftovers from a crashed write are
+removed by the maintenance job). This is correct and safe for a small-to-medium shop, but every change rewrites the whole document, so it gets slower as orders accumulate (thousands of orders is fine;
+tens of thousands is the point to move to the normalised schema in `db/migrations/0001_init.sql`). Archive or export old orders before then.
 
 ## 3. Secrets (never commit)
 ```
