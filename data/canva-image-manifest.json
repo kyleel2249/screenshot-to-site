@@ -51,6 +51,46 @@
       "status": "generated_in_canva_awaiting_export",
       "siteFile": "public/products/DDT-038.png",
       "note": "Placeholder tile is live on the site until the exported image replaces the file."
+    },
+    {
+      "sku": "DDT-044",
+      "name": "Gold-Tone Chain Necklace",
+      "canvaMediaId": "MAHZmhl2vfw",
+      "targetCanvaFolderId": "FAHZmTCtsUo",
+      "kind": "illustrative",
+      "status": "generated_in_canva_awaiting_export",
+      "siteFile": "public/products/DDT-044.png",
+      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+    },
+    {
+      "sku": "DDT-045",
+      "name": "Hoop Earrings",
+      "canvaMediaId": "MAHZmiG0jvg",
+      "targetCanvaFolderId": "FAHZmTCtsUo",
+      "kind": "illustrative",
+      "status": "generated_in_canva_awaiting_export",
+      "siteFile": "public/products/DDT-045.png",
+      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+    },
+    {
+      "sku": "DDT-074",
+      "name": "Eau de Parfum",
+      "canvaMediaId": "MAHZmlJjK9A",
+      "targetCanvaFolderId": "FAHZmVXMoWw",
+      "kind": "illustrative",
+      "status": "generated_in_canva_awaiting_export",
+      "siteFile": "public/products/DDT-074.png",
+      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+    },
+    {
+      "sku": "DDT-012",
+      "name": "Straight Bob Wig",
+      "canvaMediaId": "MAHZmjIecOE",
+      "targetCanvaFolderId": "FAHZmanHmGw",
+      "kind": "illustrative",
+      "status": "generated_in_canva_awaiting_export",
+      "siteFile": "public/products/DDT-012.png",
+      "note": "Placeholder tile is live on the site until the exported image replaces the file."
     }
   ]
 }
