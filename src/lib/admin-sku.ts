@@ -22,13 +22,16 @@ const PREFIX: Record<string, string> = {
 export function categorySkuPrefix(categoryId: string): string {
   const raw = categoryId.replace(/^cat-/, "");
   const parent = raw.split("--")[0] ?? raw;
-  return PREFIX[parent] ?? parent.slice(0, 4).toUpperCase().replace(/[^A-Z]/g, "") || "GEN";
+  const fromMap = PREFIX[parent];
+  if (fromMap) return fromMap;
+  const sliced = parent.slice(0, 4).toUpperCase().replace(/[^A-Z]/g, "");
+  return sliced || "GEN";
 }
 
 /** Suggest SKU from category + existing product count (server still validates uniqueness). */
 export function suggestSku(categoryId: string, existingSkus: string[]): string {
   const prefix = categorySkuPrefix(categoryId);
-  const re = new RegExp(`^DDT-${prefix}-(\d+)$`, "i");
+  const re = new RegExp(`^DDT-${prefix}-(\\d+)$`, "i");
   let max = 0;
   for (const s of existingSkus) {
     const m = re.exec(s);
@@ -41,7 +44,7 @@ export function suggestSlug(name: string): string {
   return slugify(name) || "product";
 }
 
-/** Draft short description from name + category label (editable AI-style suggestion, not a model call). */
+/** Draft short description from name + category label (editable suggestion, not a model call). */
 export function suggestShortDescription(name: string, categoryName: string): string {
   const n = name.trim();
   const c = categoryName.trim();
