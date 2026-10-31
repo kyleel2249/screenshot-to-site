@@ -10,7 +10,6 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
-<<<<<<< HEAD
 import { Route as PortalRouteImport } from './routes/$portal'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as AcceptInviteRouteImport } from './routes/accept-invite'
@@ -34,12 +33,6 @@ import { Route as TrackRouteImport } from './routes/track'
 import { Route as VerifyEmailRouteImport } from './routes/verify-email'
 import { Route as WholesaleRouteImport } from './routes/wholesale'
 import { Route as PoliciesSlugRouteImport } from './routes/policies.$slug'
-=======
-import { Route as CartRouteImport } from './routes/cart'
-import { Route as ContactRouteImport } from './routes/contact'
-import { Route as ShopRouteImport } from './routes/shop'
-import { Route as WholesaleRouteImport } from './routes/wholesale'
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
 import { Route as ProductSlugRouteImport } from './routes/product.$slug'
 
 const IndexRoute = IndexRouteImport.update({
@@ -47,7 +40,6 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-<<<<<<< HEAD
 const PortalRoute = PortalRouteImport.update({
   id: '/$portal',
   path: '/$portal',
@@ -73,27 +65,21 @@ const BestSellersRoute = BestSellersRouteImport.update({
   path: '/best-sellers',
   getParentRoute: () => rootRouteImport,
 } as any)
-=======
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
 const CartRoute = CartRouteImport.update({
   id: '/cart',
   path: '/cart',
   getParentRoute: () => rootRouteImport,
 } as any)
-<<<<<<< HEAD
 const CheckoutRoute = CheckoutRouteImport.update({
   id: '/checkout',
   path: '/checkout',
   getParentRoute: () => rootRouteImport,
 } as any)
-=======
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
 const ContactRoute = ContactRouteImport.update({
   id: '/contact',
   path: '/contact',
   getParentRoute: () => rootRouteImport,
 } as any)
-<<<<<<< HEAD
 const DealsRoute = DealsRouteImport.update({
   id: '/deals',
   path: '/deals',
@@ -144,14 +130,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
   path: '/reset-password',
   getParentRoute: () => rootRouteImport,
 } as any)
-=======
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
 const ShopRoute = ShopRouteImport.update({
   id: '/shop',
   path: '/shop',
   getParentRoute: () => rootRouteImport,
 } as any)
-<<<<<<< HEAD
 const TrackRoute = TrackRouteImport.update({
   id: '/track',
   path: '/track',
@@ -162,21 +145,16 @@ const VerifyEmailRoute = VerifyEmailRouteImport.update({
   path: '/verify-email',
   getParentRoute: () => rootRouteImport,
 } as any)
-=======
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
 const WholesaleRoute = WholesaleRouteImport.update({
   id: '/wholesale',
   path: '/wholesale',
   getParentRoute: () => rootRouteImport,
 } as any)
-<<<<<<< HEAD
 const PoliciesSlugRoute = PoliciesSlugRouteImport.update({
   id: '/policies/$slug',
   path: '/policies/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
-=======
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
 const ProductSlugRoute = ProductSlugRouteImport.update({
   id: '/product/$slug',
   path: '/product/$slug',
@@ -185,7 +163,6 @@ const ProductSlugRoute = ProductSlugRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-<<<<<<< HEAD
   '/$portal': typeof PortalRoute
   '/about': typeof AboutRoute
   '/accept-invite': typeof AcceptInviteRoute
@@ -209,17 +186,10 @@ export interface FileRoutesByFullPath {
   '/verify-email': typeof VerifyEmailRoute
   '/wholesale': typeof WholesaleRoute
   '/policies/$slug': typeof PoliciesSlugRoute
-=======
-  '/cart': typeof CartRoute
-  '/contact': typeof ContactRoute
-  '/shop': typeof ShopRoute
-  '/wholesale': typeof WholesaleRoute
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
   '/product/$slug': typeof ProductSlugRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-<<<<<<< HEAD
   '/$portal': typeof PortalRoute
   '/about': typeof AboutRoute
   '/accept-invite': typeof AcceptInviteRoute
@@ -243,18 +213,11 @@ export interface FileRoutesByTo {
   '/verify-email': typeof VerifyEmailRoute
   '/wholesale': typeof WholesaleRoute
   '/policies/$slug': typeof PoliciesSlugRoute
-=======
-  '/cart': typeof CartRoute
-  '/contact': typeof ContactRoute
-  '/shop': typeof ShopRoute
-  '/wholesale': typeof WholesaleRoute
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
   '/product/$slug': typeof ProductSlugRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-<<<<<<< HEAD
   '/$portal': typeof PortalRoute
   '/about': typeof AboutRoute
   '/accept-invite': typeof AcceptInviteRoute
@@ -278,18 +241,11 @@ export interface FileRoutesById {
   '/verify-email': typeof VerifyEmailRoute
   '/wholesale': typeof WholesaleRoute
   '/policies/$slug': typeof PoliciesSlugRoute
-=======
-  '/cart': typeof CartRoute
-  '/contact': typeof ContactRoute
-  '/shop': typeof ShopRoute
-  '/wholesale': typeof WholesaleRoute
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
   '/product/$slug': typeof ProductSlugRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-<<<<<<< HEAD
     | '/'
     | '/$portal'
     | '/about'
@@ -368,24 +324,11 @@ export interface FileRouteTypes {
     | '/verify-email'
     | '/wholesale'
     | '/policies/$slug'
-=======
-    '/' | '/cart' | '/contact' | '/shop' | '/wholesale' | '/product/$slug'
-  fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/cart' | '/contact' | '/shop' | '/wholesale' | '/product/$slug'
-  id:
-    | '__root__'
-    | '/'
-    | '/cart'
-    | '/contact'
-    | '/shop'
-    | '/wholesale'
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
     | '/product/$slug'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-<<<<<<< HEAD
   PortalRoute: typeof PortalRoute
   AboutRoute: typeof AboutRoute
   AcceptInviteRoute: typeof AcceptInviteRoute
@@ -409,12 +352,6 @@ export interface RootRouteChildren {
   VerifyEmailRoute: typeof VerifyEmailRoute
   WholesaleRoute: typeof WholesaleRoute
   PoliciesSlugRoute: typeof PoliciesSlugRoute
-=======
-  CartRoute: typeof CartRoute
-  ContactRoute: typeof ContactRoute
-  ShopRoute: typeof ShopRoute
-  WholesaleRoute: typeof WholesaleRoute
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
   ProductSlugRoute: typeof ProductSlugRoute
 }
 
@@ -427,7 +364,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-<<<<<<< HEAD
     '/$portal': {
       id: '/$portal'
       path: '/$portal'
@@ -463,8 +399,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BestSellersRouteImport
       parentRoute: typeof rootRouteImport
     }
-=======
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
     '/cart': {
       id: '/cart'
       path: '/cart'
@@ -472,7 +406,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CartRouteImport
       parentRoute: typeof rootRouteImport
     }
-<<<<<<< HEAD
     '/checkout': {
       id: '/checkout'
       path: '/checkout'
@@ -480,8 +413,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CheckoutRouteImport
       parentRoute: typeof rootRouteImport
     }
-=======
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
     '/contact': {
       id: '/contact'
       path: '/contact'
@@ -489,7 +420,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ContactRouteImport
       parentRoute: typeof rootRouteImport
     }
-<<<<<<< HEAD
     '/deals': {
       id: '/deals'
       path: '/deals'
@@ -560,8 +490,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ResetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
-=======
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
     '/shop': {
       id: '/shop'
       path: '/shop'
@@ -569,7 +497,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShopRouteImport
       parentRoute: typeof rootRouteImport
     }
-<<<<<<< HEAD
     '/track': {
       id: '/track'
       path: '/track'
@@ -584,8 +511,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VerifyEmailRouteImport
       parentRoute: typeof rootRouteImport
     }
-=======
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
     '/wholesale': {
       id: '/wholesale'
       path: '/wholesale'
@@ -593,7 +518,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WholesaleRouteImport
       parentRoute: typeof rootRouteImport
     }
-<<<<<<< HEAD
     '/policies/$slug': {
       id: '/policies/$slug'
       path: '/policies/$slug'
@@ -601,8 +525,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PoliciesSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
-=======
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
     '/product/$slug': {
       id: '/product/$slug'
       path: '/product/$slug'
@@ -615,7 +537,6 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-<<<<<<< HEAD
   PortalRoute: PortalRoute,
   AboutRoute: AboutRoute,
   AcceptInviteRoute: AcceptInviteRoute,
@@ -639,12 +560,6 @@ const rootRouteChildren: RootRouteChildren = {
   VerifyEmailRoute: VerifyEmailRoute,
   WholesaleRoute: WholesaleRoute,
   PoliciesSlugRoute: PoliciesSlugRoute,
-=======
-  CartRoute: CartRoute,
-  ContactRoute: ContactRoute,
-  ShopRoute: ShopRoute,
-  WholesaleRoute: WholesaleRoute,
->>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
   ProductSlugRoute: ProductSlugRoute,
 }
 export const routeTree = rootRouteImport
