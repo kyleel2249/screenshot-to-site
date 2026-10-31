@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { ChevronDown, SliersHorizontal } from "lucide-react";
+import { ChevronDown, SlidersHorizontal } from "lucide-react";
 import { useCatalog } from "@/lib/catalog-store";
 import { productsIn, search, sortProducts, type StoreProduct } from "@/lib/storefront";
 import { childrenOf, topLevel } from "@/lib/domain/categories";
