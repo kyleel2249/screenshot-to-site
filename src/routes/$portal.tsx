@@ -100,7 +100,7 @@ function Dashboard() {
     setMsg("");
     setError("");
     try {
-      const res = await fetch(`${portal}/api/products/seed`, {
+      const res = await fetch(`/${portal}/api/products/seed`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
@@ -166,7 +166,6 @@ function Dashboard() {
   return (
     <div className="min-h-screen bg-[#F4F6FA]">
       <div className="flex min-h-screen">
-        {/* Sidebar */}
         <aside className="hidden w-60 shrink-0 flex-col bg-[#071D49] text-primary-foreground lg:flex">
           <div className="border-b border-white/10 px-4 py-5">
             <p className="text-xs font-semibold uppercase tracking-wider text-gold">Dera Darko Trade</p>
@@ -181,7 +180,6 @@ function Dashboard() {
           </div>
         </aside>
 
-        {/* Main */}
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex items-center justify-between gap-3 border-b border-border bg-white px-4 py-3 lg:px-8">
             <div className="flex items-center gap-3">
@@ -236,7 +234,7 @@ function Dashboard() {
                     </button>
                   </div>
                   <p className="mt-4 text-sm text-muted-foreground">
-                    Trusted open-access mode is on. Protect this path with Cloudflare Access before production. Set STAFF_OPEN_ACCESS to false when locking down.
+                    Trusted open-access mode is on. Protect this path with Cloudflare Access before production.
                   </p>
                 </div>
               </div>
@@ -301,6 +299,11 @@ function Dashboard() {
                   categories={categories}
                   existingSkus={existingSkus}
                   busy={busy}
+                  onUploadImage={async (file) => {
+                    const r = await admin.uploadImage(file);
+                    if (r.ok && r.data?.url) return { ok: true as const, url: r.data.url };
+                    return { ok: false as const, error: r.errors.join(" ") || "Upload failed" };
+                  }}
                   onSave={async (body) => {
                     setBusy(true);
                     setError("");
@@ -322,7 +325,7 @@ function Dashboard() {
             {tab === "categories" && (
               <div className="rounded-2xl border border-border bg-white p-6">
                 <h2 className="font-display text-lg font-semibold text-primary">Categories ({categories.length})</h2>
-                <p className="mt-1 text-sm text-muted-foreground">Full taxonomy from the catalogue seed. Counts update when products are assigned.</p>
+                <p className="mt-1 text-sm text-muted-foreground">Full taxonomy from the catalogue seed.</p>
                 <ul className="mt-4 max-h-[28rem] space-y-1 overflow-y-auto text-sm">
                   {categories
                     .filter((c) => !c.parentId)
@@ -346,7 +349,7 @@ function Dashboard() {
               <div className="rounded-2xl border border-border bg-white p-6">
                 <h2 className="font-display text-lg font-semibold text-primary">Pricing & currency</h2>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Product workspace converts GHS ↔ USD using the default rate (11.47) until an owner-approved rate is stored. Enter either currency while adding a product; the other updates live. Never invent catalogue prices — only convert what you type.
+                  Product workspace converts GHS ↔ USD using the default rate (11.47) until an owner-approved rate is stored.
                 </p>
               </div>
             )}
@@ -354,9 +357,7 @@ function Dashboard() {
             {tab === "orders" && (
               <div className="rounded-2xl border border-border bg-white p-6">
                 <h2 className="font-display text-lg font-semibold text-primary">Orders</h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Order count: {overview?.orders ?? 0}. Full order workflows use the commerce API when D1 and payment secrets are configured.
-                </p>
+                <p className="mt-2 text-sm text-muted-foreground">Order count: {overview?.orders ?? 0}.</p>
               </div>
             )}
 
@@ -365,9 +366,6 @@ function Dashboard() {
                 <h2 className="font-display text-lg font-semibold text-primary">Business settings</h2>
                 <p className="mt-2 text-sm text-muted-foreground">
                   Portal path: <code className="rounded bg-secondary px-1">/{portal}</code>
-                </p>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Open access is temporary. Before production: Cloudflare Access (or allowlist), set STAFF_OPEN_ACCESS = false, configure D1, SESSION_SECRET, and MFA.
                 </p>
               </div>
             )}
