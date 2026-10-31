@@ -274,7 +274,7 @@ export function SiteFooter() {
             {site.address && <li className="whitespace-pre-line">{site.address}{site.city ? `\n${site.city}` : ""}</li>}
             {!site.address && site.city && <li>{site.city}</li>}
             {site.email && <li><a href={`mailto:${site.email}`} className="underline-offset-2 hover:underline">{site.email}</a></li>}
-            {site.phone && <li><a href={`tel:${site.phone.replace(/[+\d]/g, "")}`} className="underline-offset-2 hover:underline">{site.phone}</a></li>}
+            {site.phone && <li><a href={`tel:${site.phone.replace(/[^\d+]/g, "")}`} className="underline-offset-2 hover:underline">{site.phone}</a></li>}
             {site.whatsapp && <li><a href={waLink(site.whatsapp)} rel="noopener noreferrer" target="_blank" className="underline-offset-2 hover:underline">WhatsApp</a></li>}
             {site.hours && <li className="whitespace-pre-line text-primary-foreground/70">{site.hours}</li>}
             <li><Link to="/contact" className="underline-offset-2 hover:underline">Send us a message</Link></li>
