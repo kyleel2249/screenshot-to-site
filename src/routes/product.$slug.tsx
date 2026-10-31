@@ -7,6 +7,7 @@ import { useCurrency } from "@/lib/currency";
 import { breadcrumb } from "@/lib/domain/categories";
 import { AVAILABILITY_LABEL, PROMO_LABEL } from "@/lib/domain/status";
 import { Reviews } from "@/components/Reviews";
+import { ProductGallery } from "@/components/ProductGallery";
 import { displayPrice, findProduct, isPurchasable } from "@/lib/storefront";
 
 export const Route = createFileRoute("/product/$slug")({
@@ -28,13 +29,13 @@ function ProductPage() {
   const { slug } = Route.useParams();
   const { products, categories, status, reload } = useCatalog();
   const { add } = useCart();
-  const { mode } = useCurrency();
+  const { mode, rate } = useCurrency();
   if (status === "loading") return <div className="container-x py-20 text-center text-muted-foreground" role="status">Loading…</div>;
   if (status === "error") return <div role="alert" className="container-x py-20 text-center"><p>We couldn't load this product.</p><button className="btn-secondary mt-4" onClick={() => void reload()}>Try again</button></div>;
   const p = findProduct(products, slug);
   if (!p) return <NotFound />;
 
-  const price = displayPrice(p, mode);
+  const price = displayPrice(p, mode, rate);
   const purchasable = isPurchasable(p);
   const crumbs = breadcrumb(categories, p.categoryId);
   // Title, description, canonical, Open Graph and Product JSON-LD are written into the HTML head by the edge (src/server/seo-inject.ts)
@@ -42,7 +43,7 @@ function ProductPage() {
   return (
     <>
     <div className="container-x grid gap-10 py-12 md:grid-cols-2">
-      <img src={p.image} alt={p.imageAlt} width={816} height={816} className="w-full rounded-2xl border border-border object-cover" />
+      <ProductGallery p={p} />
       <div>
         <nav aria-label="Breadcrumb" className="text-sm text-muted-foreground">
           <Link to="/shop" search={{}} className="hover:underline">Shop</Link>

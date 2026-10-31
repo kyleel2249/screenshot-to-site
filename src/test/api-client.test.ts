@@ -941,3 +941,63 @@ describe("product photo upload", () => {
     const r = await mk().admin(PORTAL).uploadImage(new Blob([png()])); expect(r.ok).toBe(false); expect([401, 403, 404]).toContain(r.status);
   });
 });
+
+import { cleanRate, formatRate, isStale, parseRateMicro } from "../lib/domain/exchange";
+describe("owner-approved exchange rate", () => {
+  test("parses plain decimals into integer micro-units and rejects everything else", () => {
+    expect(parseRateMicro("15.5")).toBe(15_500_000); expect(parseRateMicro("15")).toBe(15_000_000); expect(parseRateMicro("0.000001")).toBe(1);
+    for (const bad of ["", "abc", "-1", "0", "1e3", "15,5", "15.1234567", "1 5", null, {}]) expect(parseRateMicro(bad)).toBeNull();
+    expect(formatRate(15_500_000)).toBe("15.50"); expect(formatRate(15_123_456)).toBe("15.123456");
+  });
+  test("requires a source and a real, non-future date; flags old rates", () => {
+    const now = Date.parse("2026-10-31T12:00:00Z");
+    expect(cleanRate({ ghsPerUsd: "15.5", source: "", effectiveDate: "2026-10-30" }, now, "u").ok).toBe(false);
+    expect(cleanRate({ ghsPerUsd: "15.5", source: "Bank", effectiveDate: "2026-02-30" }, now, "u").ok).toBe(false);
+    expect(cleanRate({ ghsPerUsd: "15.5", source: "Bank", effectiveDate: "2027-01-01" }, now, "u").ok).toBe(false);
+    expect(cleanRate({ ghsPerUsd: "9999999", source: "Bank", effectiveDate: "2026-10-30" }, now, "u").ok).toBe(false);
+    expect(cleanRate({ ghsPerUsd: "15.5", source: "Bank", effectiveDate: "2026-10-30" }, now, "u").ok).toBe(true);
+    expect(isStale({ effectiveDate: "2026-10-30" }, now)).toBe(false); expect(isStale({ effectiveDate: "2026-09-01" }, now)).toBe(true);
+  });
+  test("no rate is shown until the owner approves one; changes are audited; default display is both currencies", async () => {
+    const { mk, admin } = await shop();
+    const none = await mk().rates(); expect(none.data).toEqual({ displayMode: "DUAL", rate: null });
+    const bad = await admin.saveExchangeRate({ ghsPerUsd: "15.5", source: "", effectiveDate: "2026-10-30" }); expect(bad.ok).toBe(false); expect(bad.status).toBe(422);
+    const day = new Date().toISOString().slice(0, 10);
+    const ok = await admin.saveExchangeRate({ ghsPerUsd: "15.50", source: "Our bank, 9am", effectiveDate: day, displayMode: "DUAL" });
+    if (!ok.ok) expect(ok.errors.join(" ")).toMatch(/re-?auth/i); else {
+      const pub = await mk().rates(); expect(pub.data!.rate).toEqual({ ghsPerUsdMicro: 15_500_000, source: "Our bank, 9am", effectiveDate: day });
+      expect(JSON.stringify(pub.data)).not.toMatch(/approvedBy|approvedAt/);
+      expect((await admin.exchangeRate()).data!.stale).toBe(false);
+    }
+    expect((await mk().admin(PORTAL).exchangeRate()).ok).toBe(false);
+    expect((await admin.saveExchangeRate({ displayMode: "EUR" as never })).status).toBe(422);
+  });
+});
+
+describe("product image provenance and approval", () => {
+  const mkProduct = (admin: Awaited<ReturnType<typeof shop>>["admin"]) => admin.createProduct({ name: "Tote", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/old.jpg", imageAlt: "old", sku: "TOTE", priceGhs: 5000, onHand: 3, published: true });
+  const find = async (c: ReturnType<Awaited<ReturnType<typeof shop>>["mk"]>) => (await c.products()).data!.find((x) => x.name === "Tote")! as unknown as Record<string, unknown>;
+
+  test("new images wait for approval, illustrations are flagged, replacing keeps the old image", async () => {
+    const { admin, mk } = await shop(); const id = (await mkProduct(admin)).data!.id; const pub = mk();
+    expect((await admin.addProductMedia({ productId: id, url: "javascript:alert(1)", alt: "x", kind: "verified" })).ok).toBe(false);
+    expect((await admin.addProductMedia({ productId: id, url: "https://cdn.example/a.webp", alt: "", kind: "verified" })).ok).toBe(false);
+    expect((await admin.addProductMedia({ productId: id, url: "https://cdn.example/a.webp", alt: "a", kind: "ai" as never })).ok).toBe(false);
+    expect((await admin.addProductMedia({ productId: id, url: "https://cdn.example/a.webp", alt: "a", kind: "illustrative", canvaDesignId: "bad id" })).ok).toBe(false);
+    const add = await admin.addProductMedia({ productId: id, url: "https://cdn.example/a.webp", alt: "Tote bag, front", kind: "illustrative", canvaDesignId: "DAHZmbTWqr4" });
+    expect(add.ok).toBe(true); expect(add.data!.status).toBe("pending");
+    let p = await find(pub); expect(p["gallery"]).toEqual([]); expect(p["illustrative"]).toBe(false);
+    expect((await admin.reviewProductMedia({ productId: id, imageId: add.data!.id, action: "make_primary" })).ok).toBe(false); // not approved yet
+    expect((await admin.reviewProductMedia({ productId: id, imageId: add.data!.id, action: "approve" })).ok).toBe(true);
+    p = await find(pub); expect((p["gallery"] as unknown[]).length).toBe(1);
+    expect((await admin.reviewProductMedia({ productId: id, imageId: add.data!.id, action: "make_primary" })).ok).toBe(true);
+    p = await find(pub); expect(p["image"]).toBe("https://cdn.example/a.webp"); expect(p["illustrative"]).toBe(true); expect(p["gallery"]).toEqual([]);
+    const items = (await admin.productMedia(id)).data!.items; expect(items.some((m) => m.url === "/old.jpg" && m.kind === "previous")).toBe(true); // old image preserved
+    expect(JSON.stringify(p)).not.toMatch(/canvaDesignId|DAHZmbTWqr4|"by"/); // provenance stays internal
+    expect((await admin.reviewProductMedia({ productId: id, imageId: add.data!.id, action: "reject" })).ok).toBe(false); // can't reject the live main image
+  });
+  test("only staff can manage product images", async () => {
+    const { admin, mk } = await shop(); const id = (await mkProduct(admin)).data!.id;
+    expect((await mk().admin(PORTAL).addProductMedia({ productId: id, url: "https://cdn.example/a.webp", alt: "a", kind: "verified" })).ok).toBe(false);
+  });
+});

@@ -9,8 +9,10 @@
 import { labelOf } from "../lib/order-labels";
 import { overview } from "./services/overview";
 import { storeImage, type R2Like } from "./media";
+import { addMedia, listMedia, publicMedia, reviewMedia } from "./services/media-admin";
 import { importProducts } from "./services/import";
 import { cleanBusiness } from "../lib/business";
+import { cleanRate, isStale, rateAgeDays } from "../lib/domain/exchange";
 import { sellableQty, effectiveAvailability, activePromoLabels } from "../lib/domain/status";
 import type { Currency } from "../lib/domain/money";
 import { verifyWebhook } from "../lib/payments/webhook";
@@ -96,7 +98,7 @@ export function publicProducts(db: MemoryDb, now = new Date()) {
     out.push({
       slug: p.slug, name: p.name, categoryId: p.categoryId, createdAt: p.createdAt, shortDescription: p.shortDescription, image: p.image, imageAlt: p.imageAlt,
       availability: effectiveAvailability(v), labels: activePromoLabels(p.promo, v, { ...(p.showLimitedBelow !== undefined ? { showLimitedBelow: p.showLimitedBelow } : {}), hasValidSale: hasSale }, now),
-      price: v.price, salePrice: v.salePrice ?? null, variantId: v.id, rating: summary(db, p.id), attributes: p.attributes ?? {},
+      price: v.price, salePrice: v.salePrice ?? null, variantId: v.id, rating: summary(db, p.id), attributes: p.attributes ?? {}, ...publicMedia(p),
       ...(p.showLimitedBelow !== undefined && v.trackInventory && sellableQty(v) > 0 && sellableQty(v) <= p.showLimitedBelow ? { remaining: sellableQty(v) } : {}),
       ...(v.availability === "pre_order" ? { expectedWindow: p.expectedWindow ?? null } : {}),
     });
@@ -207,6 +209,9 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
           catch (e) { if (e instanceof DryRun) return json(e.result); throw e; } // nothing was saved
         }
         if (sub === "/products/attributes" && req.method === "POST") return json({ attributes: await transact(p, (db) => setProductAttributes(db, actor, str(body, "productId"), body["attributes"])) });
+        if (sub === "/products/media" && req.method === "GET") return json(await transact(p, (db) => listMedia(db, actor, url.searchParams.get("productId") ?? "")));
+        if (sub === "/products/media" && req.method === "POST") return json(await transact(p, (db) => addMedia(db, actor, str(body, "productId"), body)), 201);
+        if (sub === "/products/media/review" && req.method === "POST") return json(await transact(p, (db) => reviewMedia(db, actor, str(body, "productId"), str(body, "imageId"), body["action"])));
         if (sub === "/products/status" && req.method === "POST") {
           const ids = Array.isArray(body["ids"]) ? (body["ids"] as unknown[]).filter((x): x is string => typeof x === "string") : [];
           await transact(p, (db) => setAvailability(db, actor, ids, str(body, "availability") as Availability)); return json({ ok: true });
@@ -264,6 +269,25 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         }
         if (sub === "/overview" && req.method === "GET") return json(await transact(p, (db) => overview(db, actor)));
         if (sub === "/business" && req.method === "GET") { requirePermission(actor, "settings.write"); return json(await transact(p, (db) => db.business)); }
+        if (sub === "/exchange-rate" && req.method === "GET") {
+          requirePermission(actor, "settings.write");
+          return json(await transact(p, (db) => ({ rate: db.exchangeRate ?? null, displayMode: db.settings["displayMode"] ?? "DUAL", ...(db.exchangeRate ? { ageDays: rateAgeDays(db.exchangeRate, Date.now()), stale: isStale(db.exchangeRate, Date.now()) } : {}) })));
+        }
+        if (sub === "/exchange-rate" && req.method === "POST") {
+          requirePermission(actor, "settings.write");
+          const mode = body["displayMode"];
+          if (mode !== undefined && mode !== "GHS" && mode !== "USD" && mode !== "DUAL") return json({ errors: ["Choose GHS only, USD only, or both."] }, 422);
+          const clearing = body["clear"] === true;
+          const c = clearing ? null : cleanRate(body, Date.now(), actor!.id);
+          if (c && !c.ok) return json({ errors: c.errors }, 422);
+          await transact(p, (db) => {
+            if (mode) db.settings["displayMode"] = mode;
+            if (clearing) { delete db.exchangeRate; db.log("exchange_rate.cleared", {}, actor!.id); }
+            else if (c && c.ok) { db.log("exchange_rate.set", { ghsPerUsdMicro: c.rate.ghsPerUsdMicro, source: c.rate.source, effectiveDate: c.rate.effectiveDate, previous: db.exchangeRate?.ghsPerUsdMicro ?? 0 }, actor!.id); db.exchangeRate = c.rate; }
+            else if (mode) db.log("display_mode.set", { mode }, actor!.id);
+          });
+          return json({ ok: true });
+        }
         if (sub === "/business" && req.method === "POST") {
           requirePermission(actor, "settings.write");
           const c = cleanBusiness(body); if (!c.ok) return json({ errors: c.errors }, 422);
@@ -387,6 +411,10 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       ...(provider ? provider.methods(currency).filter((m) => allowed.includes(m)) : []),
       ...(bankDetails && allowed.includes("bank_transfer") ? (["bank_transfer"] as PaymentMethod[]) : []),
     ];
+    if (path === "/api/rates" && req.method === "GET") {
+      // Public: only what the storefront needs to show converted prices honestly (rate, where it came from, and how old it is).
+      return json(await transact(p, (db) => ({ displayMode: db.settings["displayMode"] ?? "DUAL", rate: db.exchangeRate ? { ghsPerUsdMicro: db.exchangeRate.ghsPerUsdMicro, source: db.exchangeRate.source, effectiveDate: db.exchangeRate.effectiveDate } : null })), 200, { "Cache-Control": "public, max-age=60" });
+    }
     if (path === "/api/site" && req.method === "GET") return json(await transact(p, (db) => db.business), 200, { "Cache-Control": "public, max-age=300" });
     if (path === "/api/payments/config" && req.method === "GET") {
       const methods = { GHS: methodsFor("GHS"), USD: methodsFor("USD") };

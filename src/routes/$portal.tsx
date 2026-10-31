@@ -8,6 +8,7 @@ import { PAY_METHOD_LABELS, type AdminDiscount, type AdminOrder, type AdminProdu
 import { childrenOf, topLevel, type CategoryNode, type FilterProfile } from "@/lib/domain/categories";
 import type { Section } from "@/lib/content";
 import { formatMoney } from "@/lib/domain/money";
+import { formatRate, RATE_STALE_DAYS } from "@/lib/domain/exchange";
 import { GHANA_REGIONS } from "@/lib/domain/regions";
 import { AVAILABILITY_LABEL, type Availability } from "@/lib/domain/status";
 import { labelOf, nextStatuses } from "@/lib/order-labels";
@@ -114,6 +115,7 @@ function Products({ admin }: { admin: Admin }) {
             <td className="p-2"><button className="underline" onClick={() => void act(() => admin.publish(p.id, !p.published), p.published ? "Unpublished." : "Published.")}>{p.published ? "Unpublish" : "Publish"}</button></td>
           </tr>))}</tbody></table>{data && !data.length && <p className="p-3 text-muted-foreground">No products yet. Add the first one below.</p>}</div>
       <ImportProducts admin={admin} onDone={reload} />
+      <ImageManager admin={admin} products={data ?? []} />
       <form className="grid gap-3 rounded-lg border border-border p-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void act(() => admin.createProduct({ ...nw, attributes: nwAttrs, priceGhs: Math.round(Number(nw.priceGhs) * 100), onHand: Number(nw.onHand), published: false }), "Product created as unpublished.").then(() => { setNw({ ...nw, name: "", sku: "" }); setNwAttrs({}); }); }}>
         <h2 className="font-display text-lg font-bold sm:col-span-2">Add product</h2>
         <Field label="Name" required value={nw.name} onChange={(e) => setNw({ ...nw, name: e.target.value })} />
@@ -646,7 +648,39 @@ function BusinessTab({ admin }: { admin: Admin }) {
           </label>))}
         <button className="btn-primary sm:col-span-2">Save business details</button>
       </form>
+      <ExchangeRatePanel admin={admin} />
     </div>
+  );
+}
+
+function ExchangeRatePanel({ admin }: { admin: Admin }) {
+  const { data, errors, reload, setErrors } = useLoad(useCallback(() => admin.exchangeRate(), [admin]));
+  const [f, setF] = useState({ ghsPerUsd: "", source: "", effectiveDate: new Date().toISOString().slice(0, 10), displayMode: "DUAL" as "GHS" | "USD" | "DUAL" });
+  const [msg, setMsg] = useState(""); const [pw, setPw] = useState(""); const [need, setNeed] = useState(false);
+  useEffect(() => { if (data) setF((v) => ({ ...v, displayMode: data.displayMode, ...(data.rate ? { ghsPerUsd: formatRate(data.rate.ghsPerUsdMicro), source: data.rate.source, effectiveDate: data.rate.effectiveDate } : {}) })); }, [data]);
+  const run = async (body: Parameters<Admin["saveExchangeRate"]>[0], ok: string) => { setMsg(""); setErrors([]); const r = await admin.saveExchangeRate(body); if (r.ok) { setMsg(ok); await reload(); } else { setNeed(r.errors.some((e) => /re-?auth/i.test(e))); setErrors(r.errors); } };
+  return (
+    <section className="mt-8 space-y-3 border-t border-border pt-6" aria-labelledby="fx-h">
+      <h2 id="fx-h" className="font-display text-lg font-semibold">Currencies and exchange rate</h2>
+      <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
+      {need && <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void admin.reauth(pw).then((r) => { if (r.ok) { setNeed(false); setPw(""); setErrors([]); setMsg("Re-authenticated. Save again."); } else setErrors(r.errors); }); }}><input aria-label="Confirm your password" type="password" autoComplete="current-password" className={inputCls} value={pw} onChange={(e) => setPw(e.target.value)} /><button className="btn-primary">Confirm</button></form>}
+      <p className="text-sm text-muted-foreground">Prices you set in a currency are always shown exactly. When a product has a price in only one currency, the other is calculated with the rate below and labelled as approximate. Checkout always charges in the currency you priced. No rate is ever assumed — until you approve one, only the prices you set are shown.</p>
+      {data?.rate && <p className="text-sm">Current rate: <strong>1 USD = GH₵ {formatRate(data.rate.ghsPerUsdMicro)}</strong> · {data.rate.source} · from {data.rate.effectiveDate} · approved by staff on {new Date(data.rate.approvedAt).toLocaleDateString()}{data.stale && <span className="ml-2 rounded bg-gold px-2 py-0.5 text-xs font-semibold text-gold-foreground">Over {RATE_STALE_DAYS} days old — please review</span>}</p>}
+      <form className="grid gap-3 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void run({ ghsPerUsd: f.ghsPerUsd, source: f.source, effectiveDate: f.effectiveDate, displayMode: f.displayMode }, "Rate approved and now used on the site."); }}>
+        <Field label="Cedis per 1 US dollar" inputMode="decimal" required placeholder="e.g. 15.50" value={f.ghsPerUsd} onChange={(e) => setF({ ...f, ghsPerUsd: e.target.value })} />
+        <Field label="Where the rate comes from" required placeholder="e.g. our bank, Bank of Ghana" value={f.source} onChange={(e) => setF({ ...f, source: e.target.value })} />
+        <Field label="Rate applies from" type="date" required value={f.effectiveDate} onChange={(e) => setF({ ...f, effectiveDate: e.target.value })} />
+        <label className="text-sm">Show prices in
+          <select className={inputCls} value={f.displayMode} onChange={(e) => setF({ ...f, displayMode: e.target.value as typeof f.displayMode })}>
+            <option value="DUAL">Both cedis and US dollars (default)</option><option value="GHS">Cedis only</option><option value="USD">US dollars only</option>
+          </select></label>
+        <div className="flex flex-wrap gap-2 sm:col-span-2">
+          <button className="btn-primary">Approve rate and save</button>
+          <button type="button" className="rounded-md border border-border px-4 py-2 text-sm" onClick={() => void run({ displayMode: f.displayMode }, "Display setting saved.")}>Save display setting only</button>
+          {data?.rate && <button type="button" className="rounded-md border border-border px-4 py-2 text-sm" onClick={() => { if (window.confirm("Remove the approved rate? Converted prices will stop being shown until you approve a new one.")) void run({ clear: true }, "Rate removed."); }}>Remove rate</button>}
+        </div>
+      </form>
+    </section>
   );
 }
 
@@ -715,5 +749,47 @@ function OverviewTab({ admin, go }: { admin: Admin; go: (t: Tab) => void }) {
             </div>))}
         </div></section>)}
     </div>
+  );
+}
+
+function ImageManager({ admin, products }: { admin: Admin; products: AdminProduct[] }) {
+  const [pid, setPid] = useState("");
+  const { data, errors, reload, setErrors } = useLoad(useCallback(() => (pid ? admin.productMedia(pid) : Promise.resolve({ ok: true, data: null, errors: [] as string[] })), [admin, pid]));
+  const [f, setF] = useState({ url: "", alt: "", kind: "verified" as "verified" | "illustrative", canvaDesignId: "" });
+  const [msg, setMsg] = useState("");
+  const run = async (fn: () => Promise<{ ok: boolean; errors: string[] }>, ok: string) => { setMsg(""); setErrors([]); const r = await fn(); if (r.ok) { setMsg(ok); await reload(); } else setErrors(r.errors); };
+  return (
+    <section className="mt-8 rounded-xl border border-border p-4" aria-labelledby="img-h">
+      <h2 id="img-h" className="font-display text-lg font-semibold">Product images</h2>
+      <p className="mt-1 text-sm text-muted-foreground">Mark each image as a verified photo or an illustration. New images stay hidden until approved. Replacing the main image keeps the old one.</p>
+      <label className="mt-3 block text-sm">Product
+        <select className={inputCls} value={pid} onChange={(e) => { setPid(e.target.value); setMsg(""); }}><option value="">Choose a product…</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+      {pid && (
+        <div className="mt-4 space-y-4">
+          <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
+          {data && <ul className="grid gap-3 sm:grid-cols-2">
+            <li className="flex gap-3 rounded-lg border border-gold p-2 text-sm"><img src={data.primary.url} alt="" width={64} height={64} className="h-16 w-16 rounded object-cover" /><div><strong>Main image</strong><br /><span className="text-muted-foreground">{data.primary.alt}</span></div></li>
+            {data.items.filter((m) => m.kind !== "previous" || m.url !== data.primary.url).map((m) => (
+              <li key={m.id} className="flex gap-3 rounded-lg border border-border p-2 text-sm">
+                <img src={m.url} alt="" width={64} height={64} loading="lazy" className="h-16 w-16 rounded object-cover" />
+                <div className="min-w-0 flex-1"><div className="truncate">{m.alt}</div>
+                  <div className="text-xs text-muted-foreground">{m.kind === "illustrative" ? "Illustration" : m.kind === "verified" ? "Verified photo" : "Previous main image"} · {m.status}{m.canvaDesignId ? ` · Canva ${m.canvaDesignId}` : ""}</div>
+                  <div className="mt-1 flex flex-wrap gap-2">
+                    {m.status !== "approved" && <button className="rounded border border-border px-2 py-1 text-xs" onClick={() => void run(() => admin.reviewProductMedia({ productId: pid, imageId: m.id, action: "approve" }), "Image approved.")}>Approve</button>}
+                    {m.status === "approved" && m.url !== data.primary.url && <button className="rounded border border-border px-2 py-1 text-xs" onClick={() => void run(() => admin.reviewProductMedia({ productId: pid, imageId: m.id, action: "make_primary" }), "Main image changed. The old one is kept.")}>Make main</button>}
+                    {m.status !== "rejected" && m.url !== data.primary.url && <button className="rounded border border-border px-2 py-1 text-xs" onClick={() => void run(() => admin.reviewProductMedia({ productId: pid, imageId: m.id, action: "reject" }), "Image rejected.")}>Reject</button>}
+                  </div></div>
+              </li>))}
+          </ul>}
+          <form className="grid gap-3 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); void run(() => admin.addProductMedia({ productId: pid, url: f.url, alt: f.alt, kind: f.kind, ...(f.canvaDesignId.trim() ? { canvaDesignId: f.canvaDesignId.trim() } : {}) }), "Image added and waiting for approval.").then(() => setF({ ...f, url: "", alt: "", canvaDesignId: "" })); }}>
+            <Field label="Image link (from an upload, or https)" required value={f.url} onChange={(e) => setF({ ...f, url: e.target.value })} />
+            <Field label="Image description (alt text)" required value={f.alt} onChange={(e) => setF({ ...f, alt: e.target.value })} />
+            <label className="text-sm">This image is
+              <select className={inputCls} value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value as typeof f.kind })}><option value="verified">A verified photo of the real item</option><option value="illustrative">An illustration / generated concept</option></select></label>
+            <Field label="Canva design ID (optional)" value={f.canvaDesignId} onChange={(e) => setF({ ...f, canvaDesignId: e.target.value })} />
+            <button className="btn-primary sm:col-span-2">Add image</button>
+          </form>
+        </div>)}
+    </section>
   );
 }

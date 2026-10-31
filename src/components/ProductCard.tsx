@@ -9,9 +9,9 @@ import { AVAILABILITY_LABEL, PROMO_LABEL } from "@/lib/domain/status";
 
 export function ProductCard({ p }: { p: StoreProduct }) {
   const { add } = useCart();
-  const { mode } = useCurrency();
+  const { mode, rate } = useCurrency();
   const view = p;
-  const price = displayPrice(p, mode);
+  const price = displayPrice(p, mode, rate);
   const purchasable = isPurchasable(p);
   const cta = view.availability === "pre_order" ? "Pre-order" : view.availability === "coming_soon" ? "Coming soon" : "Add to cart";
   const variantId = p.variantId;

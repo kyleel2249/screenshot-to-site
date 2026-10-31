@@ -10,9 +10,10 @@ import type { Currency } from "../lib/domain/money";
 import type { PromoWindow } from "../lib/domain/status";
 import type { Role } from "./rbac";
 
+export interface MediaItem { id: string; url: string; alt: string; kind: "verified" | "illustrative" | "previous"; status: "pending" | "approved" | "rejected"; createdAt: number; by: string; caption?: string; canvaDesignId?: string }
 export interface ProductRow {
   id: string; slug: string; name: string; categoryId: string; shortDescription: string; description: string;
-  image: string; imageAlt: string; promo: PromoWindow[]; showLimitedBelow?: number; expectedWindow?: string; attributes: Record<string, string>;
+  image: string; imageAlt: string; promo: PromoWindow[]; showLimitedBelow?: number; expectedWindow?: string; attributes: Record<string, string>; media?: MediaItem[];
   createdAt: string; updatedAt: string; archived: boolean;
 }
 export interface UserRow { id: string; email: string; passwordHash: string; kind: "customer" | "staff"; roles: Role[]; status: "active" | "suspended" | "deleted"; emailVerified: boolean; failedLogins: number; lockedUntil: number; mfaRequired: boolean; mfa?: { secret: string; confirmed: boolean; lastStep: number; recovery: string[]; failures?: number }; createdAt: number }
@@ -73,7 +74,8 @@ export class MemoryDb {
   privacy = new Map<string, PrivacyRequest>();
   tokens = new Map<string, { userId: string; kind: "verify" | "reset" | "invite"; expiresAt: number }>();
   business: import("../lib/business").BusinessInfo = {};
-  settings: Record<string, string> = { displayMode: "GHS" };
+  settings: Record<string, string> = { displayMode: "DUAL" };
+  exchangeRate?: import("../lib/domain/exchange").ApprovedRate;
   adminSetupClosed = false;
   redemptions = new Map<string, number>(); // `${userId}|${code}`
   seq = 0;

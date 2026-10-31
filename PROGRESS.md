@@ -87,6 +87,7 @@ Run `npm i && npm run build && npm test` locally to verify the UI layer and rege
 
 ## Decisions waiting on the owner
 - **Payment provider** (reminder requested by owner): choose among Paystack / Flutterwave / Moolre after confirming business-registration eligibility, then supply API keys. The adapter maps provider events to `{eventId, orderRef, amount, currency, status}`; everything else (verified webhook, idempotency, mismatch review, refunds) is already built and tested
+- Canva catalogue brief: master Canva folder + 21 subfolders created; owner-approved exchange rate, default dual-currency display, and image provenance/approval built and tested. No images generated because no products exist yet — see docs/CANVA_CATALOGUE.md
 - Accessibility pass: labels, skip link, live regions verified by grep; portal tabs now wrap on phones
 - Checkout offers saved addresses to signed-in customers (UI type-checked against stubs only)
 - Product photo upload is built (R2 binding `MEDIA`, magic-byte validated, served at `/media/<key>`; tests pass). Needs an R2 bucket bound by the owner

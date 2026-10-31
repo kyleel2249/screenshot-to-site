@@ -13,6 +13,7 @@ export interface ApiProduct {
   rating?: { count: number; average: number };
   availability: Availability; labels: PromoLabel[]; price: Partial<Record<Currency, number>>; salePrice: Partial<Record<Currency, number>> | null;
   variantId: string; remaining?: number; expectedWindow?: string | null; attributes: Record<string, string>;
+  gallery?: { url: string; alt: string; caption?: string; illustrative: boolean }[]; illustrative?: boolean;
 }
 export interface ApiOrder {
   id: string; ref: string; status: string; currency: Currency; subtotal: number; discount: number; shipping: number; total: number; hasPreorder: boolean; createdAt: number; payBy: number | null; paymentMethod: PayMethod | null;
@@ -71,6 +72,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     deleteAccount: () => post<{ ok: true }>("/api/account/delete"),
     checkout: (b: { lines: { variantId: string; qty: number }[]; currency: Currency; region: string; zoneId: string; guestEmail?: string; address: { recipient: string; region: string; city: string; street: string; phone?: string }; discountCode?: string; idempotencyKey: string; acceptedTerms: boolean; preorderAcknowledged?: boolean }) =>
       post<{ order: ApiOrder; trackingSecret?: string; paymentRequired: boolean; paymentAvailable: boolean; paymentMethods: PayMethod[] }>("/api/checkout", b),
+    rates: () => get<{ displayMode: DisplayModeSetting; rate: { ghsPerUsdMicro: number; source: string; effectiveDate: string } | null }>("/api/rates"),
     site: () => get<BusinessInfo>("/api/site"),
     cart: () => get<{ variantId: string; qty: number }[]>("/api/account/cart"),
     saveCart: (lines: { variantId: string; qty: number }[]) => put<{ variantId: string; qty: number }[]>("/api/account/cart", { lines }),
@@ -130,6 +132,11 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
           return res.ok && d?.url ? { ok: true, status: res.status, data: { url: d.url }, errors: [] } : { ok: false, status: res.status, data: null, errors: d?.errors ?? (d?.error ? [d.error] : ["The upload failed. Please try again."]) };
         } catch { return { ok: false, status: 0, data: null, errors: ["Network error. Check your connection and try again."] }; }
       },
+      productMedia: (productId: string) => get<{ primary: { url: string; alt: string }; items: ProductMedia[] }>(`${portal}/api/products/media?productId=${encodeURIComponent(productId)}`),
+      addProductMedia: (b: { productId: string; url: string; alt: string; kind: "verified" | "illustrative"; caption?: string; canvaDesignId?: string }) => post<ProductMedia>(`${portal}/api/products/media`, b),
+      reviewProductMedia: (b: { productId: string; imageId: string; action: "approve" | "reject" | "make_primary" }) => post<ProductMedia>(`${portal}/api/products/media/review`, b),
+      exchangeRate: () => get<{ rate: { ghsPerUsdMicro: number; source: string; effectiveDate: string; approvedBy: string; approvedAt: number } | null; displayMode: DisplayModeSetting; ageDays?: number; stale?: boolean }>(`${portal}/api/exchange-rate`),
+      saveExchangeRate: (b: { ghsPerUsd?: string; source?: string; effectiveDate?: string; displayMode?: DisplayModeSetting; clear?: boolean }) => post(`${portal}/api/exchange-rate`, b),
       overview: () => get<Overview>(`${portal}/api/overview`),
       business: () => get<BusinessInfo>(`${portal}/api/business`),
       saveBusiness: (b: BusinessInfo) => post<{ business: BusinessInfo }>(`${portal}/api/business`, b),
@@ -183,3 +190,6 @@ export interface AdminZone { id: string; name: string; regions: string[]; curren
 export interface AdminDiscount { code: string; kind: "percent" | "fixed" | "free_shipping"; value: number; currency?: Currency; startsAt?: string; endsAt?: string; minSubtotal?: number; maxRedemptions?: number; perCustomerLimit?: number; firstPurchaseOnly?: boolean; redeemed: number; active: boolean }
 export interface AdminOrder extends ApiOrder { paymentMethod: PayMethod | null; guestEmail: string | null; address: { recipient: string; region: string; city: string; street: string } }
 export type Client = ReturnType<typeof createClient>;
+
+export type DisplayModeSetting = "GHS" | "USD" | "DUAL";
+export interface ProductMedia { id: string; url: string; alt: string; kind: "verified" | "illustrative" | "previous"; status: "pending" | "approved" | "rejected"; createdAt: number; by: string; caption?: string; canvaDesignId?: string }
