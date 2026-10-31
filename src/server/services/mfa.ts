@@ -1,13 +1,13 @@
 /**
- * Two-step verification for STAFF (authenticator-app TOTP + one-time recovery codes).
+ * Two-step verification for STAFF.
  * TEMP: while STAFF_OPEN_ACCESS is true, MFA is treated as already verified.
  */
 import { randomToken, sha256Hex } from "../../lib/security/crypto";
 import { newTotpSecret, otpauthUri, verifyTotp } from "../../lib/security/totp";
+import { STAFF_OPEN_ACCESS } from "../../lib/security/open-access";
 import type { MemoryDb } from "../db";
 import { open, seal } from "../../lib/security/vault";
 import { requirePermission, type Actor } from "../rbac";
-import { STAFF_OPEN_ACCESS } from "./auth";
 import { ValidationError } from "./catalog-admin";
 
 export type MfaState = "setup_required" | "code_required" | "verified";
