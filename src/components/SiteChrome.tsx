@@ -15,7 +15,7 @@ import type { DisplayMode } from "@/lib/domain/money";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
-/** Primary links shown in the desktop bar (Shop and Categories carry menus). */
+/** Primary links shown in the desktop bar. Categories live on /shop sidebar, not as header dropdowns. */
 const PRIMARY = [
   { to: "/new-arrivals", label: "New Arrivals", wideOnly: false },
   { to: "/deals", label: "Deals", wideOnly: false },
@@ -140,34 +140,25 @@ export function SiteHeader() {
 
           <nav className={`hidden h-full items-stretch gap-5 min-[1700px]:gap-7 xl:flex`} aria-label="Main">
             <Link to="/" activeOptions={{ exact: true }} className={`${navLink} ${hideBelowWide}`} activeProps={{ className: navActive }}>Home</Link>
-            <div className="group relative flex h-full items-center">
-              <Link to="/shop" search={{}} className={`${navLink} gap-1`} activeProps={{ className: navActive }}>Shop <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></Link>
-              <div className={`${menuPanel} w-[44rem] max-w-[90vw]`}>
-                <ul className="grid grid-cols-3 gap-x-8 gap-y-5">
-                  {tops.map((c) => (
-                    <li key={c.id}>
-                      <Link to="/shop" search={{ category: c.slug }} className="font-semibold text-primary hover:underline">{c.name}</Link>
-                      <ul className="mt-1.5 space-y-1 text-sm text-muted-foreground">
-                        {childrenOf(categories, c.id).slice(0, 4).map((s) => <li key={s.id}><Link to="/shop" search={{ category: s.slug }} className="hover:text-primary hover:underline">{s.name}</Link></li>)}
-                      </ul>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-            <div className="group relative flex h-full items-center">
-              <button type="button" className={`${navLink} gap-1`} aria-haspopup="true">Categories <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></button>
-              <ul className={`${menuPanel} w-64 space-y-1 text-sm`}>
-                {tops.map((c) => <li key={c.id}><Link to="/shop" search={{ category: c.slug }} className="block rounded-md px-2 py-1.5 text-foreground/80 hover:bg-gold/15 hover:text-primary">{c.name}</Link></li>)}
-                <li className="border-t border-border pt-1"><Link to="/shop" search={{}} className="block rounded-md px-2 py-1.5 font-medium text-primary hover:bg-gold/15">All products</Link></li>
-              </ul>
-            </div>
-            {PRIMARY.map((n) => <Link key={n.to} to={n.to} className={n.wideOnly ? `${navLink} ${hideBelowWide}` : navLink} activeProps={{ className: navActive }}>{n.label}</Link>)}
+            <Link to="/shop" search={{}} className={navLink} activeProps={{ className: navActive }}>Shop</Link>
+            {PRIMARY.map((n) => (
+              <Link key={n.to} to={n.to} className={n.wideOnly ? `${navLink} ${hideBelowWide}` : navLink} activeProps={{ className: navActive }}>
+                {n.label}
+              </Link>
+            ))}
             <div className="group relative flex h-full items-center">
               <button type="button" className={`${navLink} gap-1`} aria-haspopup="true">More <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></button>
               <ul className={`${menuPanel} w-48 space-y-1 text-sm`}>
-                {MORE_NARROW.map((n) => <li key={n.to} className="min-[1700px]:hidden"><Link to={n.to} className="block rounded-md px-2 py-1.5 text-foreground/80 hover:bg-gold/15 hover:text-primary">{n.label}</Link></li>)}
-                {MORE.map((n) => <li key={n.to}><Link to={n.to} className="block rounded-md px-2 py-1.5 text-foreground/80 hover:bg-gold/15 hover:text-primary">{n.label}</Link></li>)}
+                {MORE_NARROW.map((n) => (
+                  <li key={n.to} className="min-[1700px]:hidden">
+                    <Link to={n.to} className="block rounded-md px-2 py-1.5 text-foreground/80 hover:bg-gold/15 hover:text-primary">{n.label}</Link>
+                  </li>
+                ))}
+                {MORE.map((n) => (
+                  <li key={n.to}>
+                    <Link to={n.to} className="block rounded-md px-2 py-1.5 text-foreground/80 hover:bg-gold/15 hover:text-primary">{n.label}</Link>
+                  </li>
+                ))}
               </ul>
             </div>
           </nav>
@@ -283,15 +274,16 @@ export function SiteFooter() {
             {site.address && <li className="whitespace-pre-line">{site.address}{site.city ? `\n${site.city}` : ""}</li>}
             {!site.address && site.city && <li>{site.city}</li>}
             {site.email && <li><a href={`mailto:${site.email}`} className="underline-offset-2 hover:underline">{site.email}</a></li>}
-            {site.phone && <li><a href={`tel:${site.phone.replace(/[^+\d]/g, "")}`} className="underline-offset-2 hover:underline">{site.phone}</a></li>}
+            {site.phone && <li><a href={`tel:${site.phone.replace(/[+\d]/g, "")}`} className="underline-offset-2 hover:underline">{site.phone}</a></li>}
             {site.whatsapp && <li><a href={waLink(site.whatsapp)} rel="noopener noreferrer" target="_blank" className="underline-offset-2 hover:underline">WhatsApp</a></li>}
             {site.hours && <li className="whitespace-pre-line text-primary-foreground/70">{site.hours}</li>}
             <li><Link to="/contact" className="underline-offset-2 hover:underline">Send us a message</Link></li>
+            <li className="pt-2"><CurrencySelect id="display-currency-footer" /></li>
           </ul>
         </div>
       </div>
-      <div className="border-t border-primary-foreground/10 py-5 text-center text-xs text-primary-foreground/60">
-        © {new Date().getFullYear()} Dera Darko Trade.{site.registrationNumber ? ` Registration no. ${site.registrationNumber}.` : ""}
+      <div className="border-t border-primary-foreground/10 py-4 text-center text-xs text-primary-foreground/50">
+        © {new Date().getFullYear()} Dera Darko Trade. All rights reserved.
       </div>
     </footer>
   );
