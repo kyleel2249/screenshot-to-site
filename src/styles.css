@@ -127,45 +127,43 @@
 @utility badge-preorder { border-radius: 9999px; background: var(--color-primary); color: var(--color-gold); font-size: .7rem; font-weight: 600; padding: .2rem .6rem; letter-spacing: .04em; text-transform: uppercase; }
 @utility badge-label { border-radius: 9999px; background: var(--brand-gold); color: var(--brand-navy); font-size: .7rem; font-weight: 600; padding: .2rem .6rem; letter-spacing: .04em; text-transform: uppercase; }
 
-/* —— Shop product cards: responsive 3D stage —— */
+/* Product cards: visible images + light 3D lift (no translateZ clipping) */
 .product-card-3d {
-  transform-style: preserve-3d;
-  transition: transform 320ms ease, box-shadow 320ms ease;
-  will-change: transform;
+  transition: transform 280ms ease, box-shadow 280ms ease;
 }
 .product-card-3d:hover {
-  transform: translateY(-6px) rotateX(4deg) rotateY(-3deg);
+  transform: translateY(-6px);
   box-shadow:
-    0 4px 8px oklch(0.24 0.09 264 / 8%),
-    0 18px 40px -16px oklch(0.24 0.09 264 / 28%),
-    0 0 0 1px oklch(0.82 0.17 84 / 25%);
+    0 4px 10px oklch(0.24 0.09 264 / 10%),
+    0 16px 36px -14px oklch(0.24 0.09 264 / 30%),
+    0 0 0 1px oklch(0.82 0.17 84 / 30%);
 }
 .product-card-3d-stage {
-  perspective: 900px;
   background:
-    radial-gradient(ellipse 80% 60% at 50% 40%, oklch(1 0 0) 0%, transparent 70%),
-    linear-gradient(165deg, oklch(0.98 0.01 84) 0%, oklch(0.94 0.012 264) 45%, oklch(0.91 0.02 264) 100%);
+    radial-gradient(ellipse 85% 70% at 50% 42%, #ffffff 0%, transparent 72%),
+    linear-gradient(165deg, #fafbfc 0%, #eef1f6 50%, #e4e9f0 100%);
 }
 .product-card-3d-plate {
   position: absolute;
-  left: 12%;
-  right: 12%;
-  bottom: 8%;
-  height: 18%;
+  left: 14%;
+  right: 14%;
+  bottom: 6%;
+  height: 16%;
   border-radius: 50%;
-  background: radial-gradient(ellipse at center, oklch(0.24 0.09 264 / 18%) 0%, transparent 70%);
-  filter: blur(6px);
-  transform: translateZ(-20px);
+  background: radial-gradient(ellipse at center, oklch(0.24 0.09 264 / 16%) 0%, transparent 72%);
+  filter: blur(8px);
   pointer-events: none;
+  z-index: 0;
 }
 .product-card-3d-img {
-  transform: translateZ(24px) scale(0.96);
-  filter: drop-shadow(0 12px 18px oklch(0.24 0.09 264 / 22%));
-  transition: transform 400ms ease, filter 400ms ease;
+  position: relative;
+  z-index: 1;
+  filter: drop-shadow(0 10px 16px oklch(0.24 0.09 264 / 18%));
+  transition: transform 320ms ease, filter 320ms ease;
 }
 .product-card-3d:hover .product-card-3d-img {
-  transform: translateZ(40px) scale(1.04);
-  filter: drop-shadow(0 18px 28px oklch(0.24 0.09 264 / 28%));
+  transform: scale(1.05);
+  filter: drop-shadow(0 14px 22px oklch(0.24 0.09 264 / 24%));
 }
 
 @media (prefers-reduced-motion: reduce) {
