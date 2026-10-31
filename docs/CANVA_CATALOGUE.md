@@ -1,59 +1,79 @@
 # Canva product imagery and dual-currency pricing — status report
 
 ## Phase 1 — Catalogue audit (done)
-- The repository ships **no real products**. The catalogue is empty until the owner imports products (Products tab → CSV import) or adds them by hand. Category structure (A–O) is built in.
-- Because no product records exist, **no product images have been generated**. Generating images for imaginary items would fabricate a catalogue, which the brief forbids.
-- Gaps found and fixed in this phase: (1) no stored, owner-approved exchange rate existed — now built; (2) the site's default display currency was hard-coded to GHS instead of both — now both unless the owner chooses otherwise; (3) images had no provenance or approval state — now built.
+- Full category taxonomy A–O is built.
+- Starter catalogue: 85 generic, unpublished “Coming soon / price pending” items (`data/catalogue-seed.csv`).
+- No fabricated prices, brands, medical claims, stock levels or certifications.
+- Every SKU has a navy/gold branded placeholder tile at `public/products/DDT-XXX.png`.
 
-## Phase 2 — Canva setup (done for folders; templates pending owner decision)
-Master folder **DERA DARKO TRADE — MASTER PRODUCT IMAGE LIBRARY** — https://www.canva.com/folder/FAHZmbTWqr4 (ID `FAHZmbTWqr4`), with 21 subfolders:
+## Phase 2 — Canva setup (done on connected account)
+Master folder **DERA DARKO TRADE — MASTER PRODUCT IMAGE LIBRARY**  
+https://www.canva.com/folder/FAHZmugXN_k  
+Folder ID: `FAHZmugXN_k`
 
 | Folder | ID |
 |---|---|
-| Cars | FAHZme--GLw |
-| Household & Kitchen | FAHZmY_UqwE |
-| Clothing & Fashion | FAHZmanHmGw |
-| Shoes & Footwear | FAHZmW1FAsk |
-| Phones & Accessories | FAHZmee15z8 |
-| Gift Sets | FAHZma1vCrk |
-| Jewellery | FAHZmTCtsUo |
-| Teas, Gummies & Supplements | FAHZmZhCbiA |
-| Bags & Luggage | FAHZmQeN8bU |
-| Toiletries & Personal Care | FAHZmXDqC-s |
-| Hair & Hair Accessories | FAHZmbES7wA |
-| Equipment & Medical Equipment | FAHZmY2KCLY |
-| Farm Tools | FAHZmbC2mqw |
-| Cosmetics & Fragrances | FAHZmVXMoWw |
-| Building Materials & Fixtures | FAHZmeaO10o |
-| Other Products | FAHZmbLLniw |
-| Product Promotional Graphics | FAHZmXYL3wk |
-| Homepage Featured Products | FAHZmbtAbC4 |
-| Best Sellers | FAHZmThw3ZQ |
-| New Arrivals | FAHZmVIkNnM |
-| Seasonal Campaigns | FAHZmc8R0Rs |
+| Cars | FAHZmuRzLig |
+| Household & Kitchen | FAHZmkdAwDw |
+| Clothing & Fashion | FAHZmic4XbE |
+| Shoes & Footwear | FAHZmmQYZ7U |
+| Phones & Accessories | FAHZmuwbN88 |
+| Gift Sets | FAHZmr4UIbM |
+| Jewellery | FAHZmrQ_dMA |
+| Teas, Gummies & Supplements | FAHZmlWR1ek |
+| Bags & Luggage | FAHZmuF5mMY |
+| Toiletries & Personal Care | FAHZmihi72I |
+| Hair & Hair Accessories | FAHZmv0gJgQ |
+| Equipment & Medical Equipment | FAHZmuTjsyE |
+| Farm Tools | FAHZmsooa4I |
+| Cosmetics & Fragrances | FAHZmtWTHFk |
+| Building Materials & Fixtures | FAHZmhqdxM8 |
+| Other Products | FAHZmmHDnbs |
+| Product Promotional Graphics | FAHZmp1mV4w |
+| Homepage Featured Products | FAHZmuZoPJw |
+| Best Sellers | FAHZmv0FFyM |
+| New Arrivals | FAHZmt_bxlc |
+| Seasonal Campaigns | FAHZmxwIpM8 |
 
-Not yet done: product-image and promotional templates, and any image generation. These wait for real product records and for the owner's approval of the approach (decision gate below).
+## Owner decision (2026-10-31)
+**Illustrative AI images are approved for use as temporary product photos.**
+- Do **not** show any “illustrative”, “AI-generated”, or similar notice to shoppers.
+- Treat generated images as normal product images on the storefront.
+- Keep internal tracking only (admin / manifest) so real supplier photos can replace them later without customer-facing change.
+- Vehicles, medical equipment, health teas/supplements and building materials remain “enquire” placeholders (no AI generation) to avoid looking like exact items for sale.
 
-## What the website now supports (built and tested)
-- **Exchange rate**: the owner enters cedis-per-dollar as text (parsed to integer micro-units, no floating point), names the source, and gives the effective date. Changes need a recent password re-check and are audit-logged (previous rate recorded). Rates over 14 days old are flagged. Nothing is assumed: with no approved rate, only prices the owner set are shown.
-- **Display mode**: cedis only, dollars only, or both (default). Shoppers may override for display; checkout always charges in the currency the owner priced. A converted price is labelled approximate with the rate, source and date.
-- **Image provenance**: each image is a verified photo or an illustration; new images are hidden until approved; making an image the main one keeps the previous one; the live main image can't be rejected; shoppers see an "Illustrative image" note on illustrations; Canva design IDs are stored internally and never exposed publicly.
-- **Photo upload** to Cloudflare R2 (see DEPLOYMENT.md) with byte-level validation.
+## Phase 3 — Image generation (in progress, credit-limited)
+Generation jobs have been started for:
+- DDT-029 Classic White Sneakers
+- DDT-010 Leather-Look Tote Bag
+- DDT-054 Everyday Backpack
+- DDT-037 Portable Power Bank
+- DDT-038 Smart Watch
+- DDT-044 Gold-Tone Chain Necklace
+- DDT-045 Hoop Earrings
 
-## Not built from the brief (honest list)
-- Direct Canva-to-website export/upload: Canva's connection here can export a design to a download link, but this site has no stored Canva credentials (by design). Workflow: export from Canva → upload in the Products tab → add with its Canva design ID.
-- Per-product original/sale/wholesale/cost price fields beyond the existing price and sale price; cost-based pricing and "Pending Price Approval" status.
-- Bulk "generate images for a whole category" from the dashboard.
-- Image-generation history beyond the audit log.
+Further batches are blocked until Canva AI image credits are restored on the connected account.
 
-## Decision gate — owner approval needed
-1. Provide real products (CSV import) or confirm a starting list to illustrate.
-2. Confirm that illustrative (generated) images may be used as placeholders, shown with the "Illustrative image" note, until verified photos replace them.
-3. Approve an exchange rate and its source.
+**Workflow when credits return**
+1. Generate remaining safe-category images (fashion, shoes, bags, phones accessories, jewellery, cosmetics, household, gift sets, toiletries, hair).
+2. Move each asset into its category folder under `FAHZmugXN_k`.
+3. Owner (or admin) downloads PNG ≥ 800×800 from Canva → replaces `public/products/<SKU>.png` or uploads via Products → Product images.
+4. Mark internally as placeholder until a verified photo is uploaded; never surface that flag to customers.
 
-## Update — starter catalogue, exchange rate, images (2026-10-31)
-- **Starter items**: `data/catalogue-seed.csv` names 85 generic items across all 69 subcategories (no brands, specs, prices or stock). Every item is **Coming soon, unpublished, price pending**. Import it from Products → Import (check first, then import). Items can't be published until a price is set. Edit names freely; vehicles, medical and "enquire" items are deliberately generic.
-- **Exchange rate**: 11.47 cedis per US dollar is configured (`EXCHANGE_RATE_GHS_PER_USD` in `wrangler.example.jsonc` / `.env.example`, dated 2026-10-31, source "Owner-set rate"). A rate saved in the dashboard overrides it. Shoppers see prices without any rate/source wording; checkout always states the currency actually charged.
-- **Images**: every item has a navy-and-gold branded tile at `public/products/<SKU>.png` so the site never shows a broken image. Nine AI-generated product images exist in Canva (IDs in `data/canva-image-manifest.json`). Canva's AI image credits then ran out, so the rest are not generated. Canva's download hosts are blocked from the build environment, so full-size files can't be copied into the repo from here.
-- **To use a generated image**: open it in Canva → Download (PNG, 800×800 or larger) → save as `public/products/<SKU>.png` (replacing the tile) and redeploy; or upload it in Products → Product images. Mark it "illustration" there so it can be found and replaced by a real photo later. Shoppers only see a general line, "Images are for illustration. Colour and finish may vary slightly."
-- **Not generated on purpose**: vehicles, medical equipment, health supplements/teas and building materials — a generated picture could be read as the exact item for sale.
+## Dual-currency pricing (already built)
+- Default display: both GHS and USD.
+- Exchange rate: 11.47 GHS per USD (owner-set, 2026-10-31). Dashboard override supported.
+- Products stay unpublished until a price is approved.
+- Integer micro-unit arithmetic; audit log; no invented rates.
+
+## What the website supports
+- Image upload to Cloudflare R2 with validation.
+- Canva design/media IDs stored internally only.
+- Product cards and detail pages ready for dual currency + availability labels.
+- Admin Products tab: CSV import, image assignment, price approval.
+
+## Honest limitations
+- Direct Canva → site auto-upload is not wired (by design; no stored Canva credentials in the app).
+- Export path: Canva Download → admin upload or replace file in `public/products/`.
+- Bulk “generate whole category” dashboard action not yet built.
+- Canva AI credits are finite; generation must resume when credits are available.
