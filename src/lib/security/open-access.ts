@@ -2,10 +2,10 @@
  * TEMPORARY development unlock for Dera Darko Trade admin.
  *
  * When true:
- * - Staff may sign in without a correct password / MFA / email verification
- * - Owner enrolment does not need ADMIN_BOOTSTRAP_REF_HASH
- * - A default portal path is used if ADMIN_PORTAL_PATH is unset
- * - The Worker may run the API on in-memory persistence if D1/secrets are missing
+ * - Admin dashboard needs NO login, password, email verification, or MFA
+ * - Any visit to the portal path auto-grants an owner session
+ * - Owner enrolment bootstrap hash is not required
+ * - API may run on in-memory persistence if D1/secrets are missing
  *
  * Set to false and redeploy before real production traffic.
  */
