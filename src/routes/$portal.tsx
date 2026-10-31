@@ -1,6 +1,5 @@
 /**
  * Staff dashboard — opens automatically (STAFF_OPEN_ACCESS). No login screen.
- * Navy sidebar + overview + products + intelligent product workspace.
  */
 import { createFileRoute, notFound, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -25,14 +24,7 @@ export const Route = createFileRoute("/$portal")({
   component: Dashboard,
 });
 
-type Tab =
-  | "overview"
-  | "products"
-  | "add"
-  | "categories"
-  | "pricing"
-  | "orders"
-  | "settings";
+type Tab = "overview" | "products" | "add" | "categories" | "pricing" | "orders" | "settings";
 
 const NAV: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -183,11 +175,7 @@ function Dashboard() {
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="flex items-center justify-between gap-3 border-b border-border bg-white px-4 py-3 lg:px-8">
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                className="rounded-lg border border-border px-3 py-1.5 text-sm lg:hidden"
-                onClick={() => setNavOpen(true)}
-              >
+              <button type="button" className="rounded-lg border border-border px-3 py-1.5 text-sm lg:hidden" onClick={() => setNavOpen(true)}>
                 Menu
               </button>
               <h1 className="font-display text-lg font-bold text-primary lg:text-xl">
@@ -233,9 +221,6 @@ function Dashboard() {
                       Manage catalogue
                     </button>
                   </div>
-                  <p className="mt-4 text-sm text-muted-foreground">
-                    Trusted open-access mode is on. Protect this path with Cloudflare Access before production.
-                  </p>
                 </div>
               </div>
             )}
@@ -275,12 +260,7 @@ function Dashboard() {
                             <td className="px-4 py-3">{p.published ? "Published" : "Draft"}</td>
                             <td className="px-4 py-3">{p.onHand}</td>
                             <td className="px-4 py-3">
-                              <button
-                                type="button"
-                                disabled={busy}
-                                className="text-xs font-medium text-primary underline"
-                                onClick={() => void togglePublish(p)}
-                              >
+                              <button type="button" disabled={busy} className="text-xs font-medium text-primary underline" onClick={() => void togglePublish(p)}>
                                 {p.published ? "Unpublish" : "Publish"}
                               </button>
                             </td>
@@ -308,15 +288,19 @@ function Dashboard() {
                     setBusy(true);
                     setError("");
                     setMsg("");
-                    const r = await admin.createProduct(body);
-                    setBusy(false);
-                    if (!r.ok) {
-                      setError(r.errors.join(" ") || "Could not create product");
-                      throw new Error("create failed");
+                    try {
+                      const r = await admin.createProduct(body);
+                      if (!r.ok) {
+                        const detail = r.errors.join(" ") || "Could not create product";
+                        setError(detail);
+                        throw new Error(detail);
+                      }
+                      setMsg(`Created ${String(body.name)}`);
+                      await load();
+                      setTab("products");
+                    } finally {
+                      setBusy(false);
                     }
-                    setMsg(`Created ${String(body.name)}`);
-                    await load();
-                    setTab("products");
                   }}
                 />
               </div>
@@ -325,7 +309,6 @@ function Dashboard() {
             {tab === "categories" && (
               <div className="rounded-2xl border border-border bg-white p-6">
                 <h2 className="font-display text-lg font-semibold text-primary">Categories ({categories.length})</h2>
-                <p className="mt-1 text-sm text-muted-foreground">Full taxonomy from the catalogue seed.</p>
                 <ul className="mt-4 max-h-[28rem] space-y-1 overflow-y-auto text-sm">
                   {categories
                     .filter((c) => !c.parentId)
@@ -348,9 +331,7 @@ function Dashboard() {
             {tab === "pricing" && (
               <div className="rounded-2xl border border-border bg-white p-6">
                 <h2 className="font-display text-lg font-semibold text-primary">Pricing & currency</h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  Product workspace converts GHS ↔ USD using the default rate (11.47) until an owner-approved rate is stored.
-                </p>
+                <p className="mt-2 text-sm text-muted-foreground">Default conversion rate 11.47 GHS per USD until an approved rate is stored.</p>
               </div>
             )}
 
@@ -365,7 +346,7 @@ function Dashboard() {
               <div className="rounded-2xl border border-border bg-white p-6">
                 <h2 className="font-display text-lg font-semibold text-primary">Business settings</h2>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Portal path: <code className="rounded bg-secondary px-1">/{portal}</code>
+                  Portal: <code className="rounded bg-secondary px-1">/{portal}</code>
                 </p>
               </div>
             )}
