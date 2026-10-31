@@ -1,16 +1,16 @@
 import { checkPasswordPolicy, hashPassword, randomToken, sha256Hex, signSession, verifyPassword, verifySession } from "../../lib/security/crypto";
 import { enrolOwner, type AdminStore } from "../../lib/security/enrolment";
+import { STAFF_OPEN_ACCESS } from "../../lib/security/open-access";
 import type { MemoryDb, UserRow } from "../db";
 import type { Actor } from "../rbac";
+
+export { STAFF_OPEN_ACCESS };
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_FAILS = 5, LOCK_MS = 15 * 60_000, SESSION_MS = 12 * 3600_000;
 const norm = (e: string) => e.trim().toLowerCase();
 const byEmail = (db: MemoryDb, email: string) => [...db.users.values()].find((u) => u.email === norm(email));
 export const GENERIC_LOGIN_ERROR = "Incorrect email or password.";
-
-/** TEMPORARY: staff access is open (no password / email-verify / MFA gate). Set to false and redeploy when locking down for production. */
-export const STAFF_OPEN_ACCESS = true;
 
 export async function registerCustomer(db: MemoryDb, i: { email: string; password: string; firstName: string; lastName: string; acceptTerms: boolean; marketingConsent?: boolean }, iterations?: number) {
   const errors: string[] = [];
@@ -144,7 +144,6 @@ export function adminStoreFor(db: MemoryDb, iterations?: number): AdminStore & {
     createOwner: async (i) => {
       if ([...db.users.values()].some((u) => u.kind === "staff") || db.adminSetupClosed) throw new Error("Setup closed");
       const id = db.nextId("usr");
-      // TEMP: open access marks owner email verified immediately.
       const row: UserRow = { id, email: i.email, passwordHash: i.passwordHash, kind: "staff", roles: ["owner"], status: "active", emailVerified: STAFF_OPEN_ACCESS, failedLogins: 0, lockedUntil: 0, mfaRequired: !STAFF_OPEN_ACCESS, createdAt: Date.now(), ...(i.temporaryPassword && !STAFF_OPEN_ACCESS ? { mustChangePassword: true } : {}) };
       db.users.set(id, row); db.tokens.set(i.verifyToken, { userId: id, kind: "verify", expiresAt: Date.now() + 24 * 3600_000 });
       db.adminSetupClosed = true;
