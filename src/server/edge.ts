@@ -13,6 +13,7 @@ import { handle, publicProducts, type Deps, type Env } from "./api";
 import { injectProductSeo } from "./seo-inject";
 import { timingSafeEqual } from "../lib/security/crypto";
 import { runMaintenance } from "./maintenance";
+import { serveImage } from "./media";
 import { transact, type Persistence } from "./persistence/transact";
 
 const BASE_HEADERS: Record<string, string> = {
@@ -65,6 +66,7 @@ export async function route(req: Request, env: Env, persistence: Persistence, ss
   }
   if (path === "/api" || path.startsWith("/api/") || (isPortal && path.startsWith(`${portal}/api`))) return withHeaders(await handle(req, env, persistence, deps));
 
+  if (req.method === "GET" && path.startsWith("/media/")) return withHeaders(await serveImage(env.MEDIA, path.slice(7)));
   if (req.method === "GET" && path === "/robots.txt") return withHeaders(new Response(buildRobots(env.SITE_ORIGIN, portal), { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "public, max-age=3600" } }));
   if (req.method === "GET" && path === "/sitemap.xml") {
     const products = await transact(persistence, (db) => [...db.products.values()].map((p) => ({ slug: p.slug, updatedAt: p.updatedAt, archived: p.archived, published: [...db.variants.values()].some((v) => v.productId === p.id && v.published) })));

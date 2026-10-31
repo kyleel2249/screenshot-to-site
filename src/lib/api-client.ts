@@ -122,6 +122,14 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
       receivePurchaseOrder: (id: string, lines: { variantId: string; qty: number }[]) => post(`${portal}/api/purchase-orders/receive`, { id, lines }),
       preorderQueue: () => get<PreorderQueueItem[]>(`${portal}/api/preorder-queue`),
       allocatePreorder: (orderId: string) => post(`${portal}/api/orders/allocate-preorder`, { orderId }),
+      uploadImage: async (file: Blob): Promise<ApiResult<{ url: string }>> => {
+        try {
+          const res = await f(`${base}${portal}/api/media`, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/octet-stream", ...(opts.origin ? { Origin: opts.origin } : {}) }, body: file });
+          const text = await res.text(); let data: unknown = null; try { data = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
+          const d = data as { errors?: string[]; error?: string; url?: string } | null;
+          return res.ok && d?.url ? { ok: true, status: res.status, data: { url: d.url }, errors: [] } : { ok: false, status: res.status, data: null, errors: d?.errors ?? (d?.error ? [d.error] : ["The upload failed. Please try again."]) };
+        } catch { return { ok: false, status: 0, data: null, errors: ["Network error. Check your connection and try again."] }; }
+      },
       overview: () => get<Overview>(`${portal}/api/overview`),
       business: () => get<BusinessInfo>(`${portal}/api/business`),
       saveBusiness: (b: BusinessInfo) => post<{ business: BusinessInfo }>(`${portal}/api/business`, b),

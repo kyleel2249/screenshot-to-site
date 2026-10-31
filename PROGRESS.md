@@ -87,6 +87,7 @@ Run `npm i && npm run build && npm test` locally to verify the UI layer and rege
 
 ## Decisions waiting on the owner
 - **Payment provider** (reminder requested by owner): choose among Paystack / Flutterwave / Moolre after confirming business-registration eligibility, then supply API keys. The adapter maps provider events to `{eventId, orderRef, amount, currency, status}`; everything else (verified webhook, idempotency, mismatch review, refunds) is already built and tested
+- Product photo upload is built (R2 binding `MEDIA`, magic-byte validated, served at `/media/<key>`; tests pass). Needs an R2 bucket bound by the owner
 - Email provider key (`EMAIL_API_KEY`, `EMAIL_FROM`) and a verified sending domain
 - Real products, contact details, registration information, and legal review of the policy text
 

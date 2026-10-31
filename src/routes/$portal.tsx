@@ -132,6 +132,11 @@ function Products({ admin }: { admin: Admin }) {
             <AttributeInputs profile={profileOf(nw.categoryId)} values={nwAttrs} onChange={setNwAttrs} /></fieldset>)}
         <Field label="Short description" required value={nw.shortDescription} onChange={(e) => setNw({ ...nw, shortDescription: e.target.value })} />
         <Field label="Image URL" required value={nw.image} onChange={(e) => setNw({ ...nw, image: e.target.value })} />
+        <div className="sm:col-span-2">
+          <label className="mb-1 block text-sm font-medium" htmlFor="photo-upload">Or upload a photo (JPEG, PNG, WebP or GIF, up to 3 MB)</label>
+          <input id="photo-upload" type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="block w-full text-sm"
+            onChange={async (e) => { const file = e.target.files?.[0]; if (!file) return; setErrors([]); const r = await admin.uploadImage(file); if (r.ok && r.data) { setNw((v) => ({ ...v, image: r.data!.url })); setMsg("Photo uploaded and filled in above."); } else setErrors(r.errors); e.target.value = ""; }} />
+        </div>
         <Field label="Image description (alt text)" required value={nw.imageAlt} onChange={(e) => setNw({ ...nw, imageAlt: e.target.value })} />
         <button className="btn-primary sm:col-span-2">Create product</button>
       </form>

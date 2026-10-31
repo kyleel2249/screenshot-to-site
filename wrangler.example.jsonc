@@ -10,5 +10,8 @@
   "d1_databases": [
     { "binding": "DB", "database_name": "dera-darko-trade", "database_id": "<paste the id printed by `wrangler d1 create`>" }
   ],
+  "r2_buckets": [
+    { "binding": "MEDIA", "bucket_name": "dera-darko-trade-media" }
+  ],
   "triggers": { "crons": ["*/5 * * * *"] }
 }

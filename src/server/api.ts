@@ -8,6 +8,7 @@
  */
 import { labelOf } from "../lib/order-labels";
 import { overview } from "./services/overview";
+import { storeImage, type R2Like } from "./media";
 import { importProducts } from "./services/import";
 import { cleanBusiness } from "../lib/business";
 import { sellableQty, effectiveAvailability, activePromoLabels } from "../lib/domain/status";
@@ -38,7 +39,7 @@ import type { Availability } from "../lib/domain/status";
 
 export interface Env {
   SESSION_SECRET: string; SITE_ORIGIN: string; ADMIN_BOOTSTRAP_REF_HASH?: string; ADMIN_PORTAL_PATH?: string;
-  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string; DATA_ENCRYPTION_KEY?: string; CSP_MODE?: string; MAINTENANCE_KEY?: string;
+  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string; DATA_ENCRYPTION_KEY?: string; CSP_MODE?: string; MAINTENANCE_KEY?: string; MEDIA?: R2Like;
 }
 export type NoticeTemplate = "order_received" | "order_update" | "payment_received" | "quote_ready" | "ticket_reply";
 export interface Deps {
@@ -143,7 +144,8 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
     }
 
     let body: Body = {};
-    if (!["GET", "HEAD"].includes(req.method)) {
+    const isUpload = req.method === "POST" && path.endsWith("/api/media"); // binary body: read by the upload handler, not as JSON
+    if (!["GET", "HEAD"].includes(req.method) && !isUpload) {
       const parsed = await readBody(req, path.endsWith("/api/products/import") ? 1_300_000 : undefined); // only the staff CSV import may be large
       if (!parsed) return json({ error: "Bad request" }, 400); // malformed or oversized JSON
       body = parsed;
@@ -251,6 +253,15 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         if (sub === "/purchase-orders" && req.method === "POST") { const po = await transact(p, (db) => createPurchaseOrder(db, actor, body)); return json({ id: po.id, ref: po.ref }, 201); }
         if (sub === "/purchase-orders/status" && req.method === "POST") { await transact(p, (db) => setPurchaseOrderStatus(db, actor, str(body, "id"), body["to"])); return json({ ok: true }); }
         if (sub === "/purchase-orders/receive" && req.method === "POST") { await transact(p, (db) => receivePurchaseOrder(db, actor, str(body, "id"), body["lines"])); return json({ ok: true }); }
+        if (sub === "/media" && req.method === "POST") {
+          requirePermission(actor, "product.write");
+          if (!env.MEDIA) return json({ errors: ["Photo upload isn't set up yet. Add an R2 bucket binding named MEDIA, or paste an image link instead."] }, 503);
+          if (Number(req.headers.get("content-length") ?? 0) > 3_100_000) return json({ errors: ["The image is too large (3 MB maximum). Resize it and try again."] }, 422);
+          const r = await storeImage(env.MEDIA, await req.arrayBuffer());
+          if ("error" in r) return json({ errors: [r.error] }, 422);
+          await transact(p, (db) => { db.log("media.uploaded", { url: r.url }, actor!.id); });
+          return json(r, 201);
+        }
         if (sub === "/overview" && req.method === "GET") return json(await transact(p, (db) => overview(db, actor)));
         if (sub === "/business" && req.method === "GET") { requirePermission(actor, "settings.write"); return json(await transact(p, (db) => db.business)); }
         if (sub === "/business" && req.method === "POST") {

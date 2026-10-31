@@ -48,6 +48,10 @@ npm i && npm run build && npm test     # regenerates src/routeTree.gen.ts; fix a
 ```
 Use `wrangler.example.jsonc` as the starting point for your Cloudflare config (D1 binding `DB`, `SITE_ORIGIN`, cron trigger) and adapt it to the Worker output your build produces. If your platform does not run the Worker's `scheduled` handler, schedule a `POST https://<site>/api/maintenance` with header `x-maintenance-key: <MAINTENANCE_KEY>` every 5 minutes instead (any scheduler works; the endpoint stays disabled until you set a `MAINTENANCE_KEY` of 24+ characters).
 
+### Product photos (optional, Cloudflare R2)
+
+Create an R2 bucket and bind it to the Worker as `MEDIA` (see `wrangler.example.jsonc`). Staff can then upload JPEG, PNG, WebP or GIF photos (up to 3 MB) from the Products tab; the file's real bytes are checked, SVG and other active formats are refused, and photos are served from `/media/<random-name>` with `nosniff`, a sandboxing CSP and long-lived caching. Without the binding the upload says so plainly and staff can still paste an image link.
+
 ## 6. Before taking real money
 - Provider adapter + webhook mapping to `{eventId, orderRef, amount, currency, status}`; test with sandbox credentials; confirm settlement currency.
 - Maintenance Cron Trigger: add `"triggers": { "crons": ["*/5 * * * *"] }` to your wrangler config. The Worker's `scheduled` handler releases expired stock holds (bank-transfer holds included) and clears expired sessions and tokens.

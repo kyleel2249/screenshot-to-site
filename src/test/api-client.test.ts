@@ -5,6 +5,7 @@ import { SEED_CATEGORIES } from "../lib/domain/categories";
 import { createClient } from "../lib/api-client";
 import { sha256Hex } from "../lib/security/crypto";
 import { handle, type Env } from "../server/api";
+import { route } from "../server/edge";
 import { MemoryPersistence, transact } from "../server/persistence/transact";
 
 const ORIGIN = "https://shop.test", PORTAL = "/ops-k7q2m9x4p1z8", PW = "Str0ng!Passw0rd#";
@@ -431,7 +432,7 @@ async function shop(payments?: PaymentProvider, extraEnv: Partial<Env> = {}, sin
     await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await staff.verifyEmail(toks.at(-1)!); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 5, published: true });
     const order = async (c = mk(), key = `k${Math.random()}`) => (await c.checkout({ lines: [{ variantId: `${prod.data!.id}::CAP`, qty: 1 }], currency: "GHS", region: "Greater Accra", zoneId: "z", guestEmail: "g@x.com", address: { recipient: "R", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: key, acceptedTerms: true })).data!;
-    return { p, mk, order, call, admin };
+    return { p, env, mk, order, call, admin };
   }
 describe("online payment flow", () => {
   const fake = (log: { init?: unknown }): PaymentProvider => ({ name: "fakepay", methods: (c) => (c === "GHS" ? ["card", "mobile_money"] : ["card"]), initialize: async (i) => { log.init = i; return { ok: true, redirectUrl: "https://pay.example/session" }; }, parseWebhook: async (raw, h) => (h.get("x-sig") === "good" ? JSON.parse(raw) : null) });
@@ -915,5 +916,28 @@ describe("resuming payment after leaving checkout", () => {
     const c = mk(); await c.register({ email: "pay@w.com", password: PW, firstName: "A", lastName: "B", acceptTerms: true }); await c.login("pay@w.com", PW);
     const placed = (await c.checkout({ lines: [{ variantId: (await c.products()).data![0]!.variantId, qty: 1 }], currency: "GHS", region: "Greater Accra", zoneId: "z", address: { recipient: "A", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: "pay-1", acceptedTerms: true })).data!;
     const list = (await c.orders()).data!; expect(list[0]).toMatchObject({ ref: placed.order.ref, status: "pending_payment" }); expect(list[0]!.payBy).toBeGreaterThan(Date.now());
+  });
+});
+
+describe("product photo upload", () => {
+  const bucket = () => { const m = new Map<string, ArrayBuffer>(); return { m, r2: { put: async (k: string, v: ArrayBuffer) => { m.set(k, v); }, get: async (k: string) => (m.has(k) ? { body: m.get(k)! } : null) } }; };
+  const png = () => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+
+  test("says so honestly when no bucket is configured", async () => {
+    const { admin } = await shop(); const r = await admin.uploadImage(new Blob([png()]));
+    expect(r.ok).toBe(false); expect(r.status).toBe(503); expect(r.errors[0]).toMatch(/R2/);
+  });
+  test("stores a real image, serves it publicly with safe headers, and rejects disguised files", async () => {
+    const { m, r2 } = bucket(); const { admin, p, env } = await shop(undefined, { MEDIA: r2 }); const call = (path: string) => route(new Request(ORIGIN + path), env, p, () => new Response("ssr"));
+    const ok = await admin.uploadImage(new Blob([png()])); expect(ok.ok).toBe(true); expect(ok.data!.url).toMatch(/^\/media\/[a-f0-9]{32}\.png$/); expect(m.size).toBe(1);
+    const got = await call(ok.data!.url); expect(got.status).toBe(200); expect(got.headers.get("content-type")).toBe("image/png"); expect(got.headers.get("x-content-type-options")).toBe("nosniff");
+    expect((await call("/media/not-a-key.png")).status).toBe(404); expect((await call("/media/" + "a".repeat(32) + ".png")).status).toBe(404);
+    const svg = await admin.uploadImage(new Blob(['<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>'])); expect(svg.ok).toBe(false); expect(svg.status).toBe(422);
+    expect((await admin.uploadImage(new Blob([]))).ok).toBe(false);
+    expect((await admin.uploadImage(new Blob([new Uint8Array(3_100_001).fill(1)]))).ok).toBe(false); expect(m.size).toBe(1);
+  });
+  test("only signed-in staff can upload", async () => {
+    const { r2 } = bucket(); const { mk } = await shop(undefined, { MEDIA: r2 });
+    const r = await mk().admin(PORTAL).uploadImage(new Blob([png()])); expect(r.ok).toBe(false); expect([401, 403, 404]).toContain(r.status);
   });
 });
