@@ -9,6 +9,9 @@ const norm = (e: string) => e.trim().toLowerCase();
 const byEmail = (db: MemoryDb, email: string) => [...db.users.values()].find((u) => u.email === norm(email));
 export const GENERIC_LOGIN_ERROR = "Incorrect email or password.";
 
+/** TEMPORARY: staff access is open (no password / email-verify / MFA gate). Set to false and redeploy when locking down for production. */
+export const STAFF_OPEN_ACCESS = true;
+
 export async function registerCustomer(db: MemoryDb, i: { email: string; password: string; firstName: string; lastName: string; acceptTerms: boolean; marketingConsent?: boolean }, iterations?: number) {
   const errors: string[] = [];
   if (!EMAIL.test(i.email)) errors.push("Enter a valid email address.");
@@ -16,15 +19,14 @@ export async function registerCustomer(db: MemoryDb, i: { email: string; passwor
   if (!i.acceptTerms) errors.push("You must accept the terms and privacy policy.");
   errors.push(...checkPasswordPolicy(i.password));
   if (errors.length) return { ok: false as const, errors };
-  // Same response whether or not the email exists, so registration cannot be used to enumerate accounts.
   if (!byEmail(db, i.email)) {
     const id = db.nextId("usr");
     db.users.set(id, { id, email: norm(i.email), passwordHash: await hashPassword(i.password, iterations), kind: "customer", roles: [], status: "active", emailVerified: false, failedLogins: 0, lockedUntil: 0, mfaRequired: false, createdAt: Date.now() });
-    db.profiles.set(id, { userId: id, firstName: i.firstName.trim(), lastName: i.lastName.trim(), marketingConsent: i.marketingConsent === true }); // never pre-ticked
+    db.profiles.set(id, { userId: id, firstName: i.firstName.trim(), lastName: i.lastName.trim(), marketingConsent: i.marketingConsent === true });
     const token = randomToken();
     db.tokens.set(await sha256Hex(token), { userId: id, kind: "verify", expiresAt: Date.now() + 24 * 3600_000 });
     db.log("customer.registered", { userId: id });
-    return { ok: true as const, verifyToken: token }; // delivered by email only
+    return { ok: true as const, verifyToken: token };
   }
   return { ok: true as const };
 }
@@ -37,17 +39,17 @@ export async function verifyEmail(db: MemoryDb, token: string, now = Date.now())
   u.emailVerified = true; db.log("email.verified", { userId: u.id }); return true;
 }
 
-export async function login(db: MemoryDb, i: { email: string; password: string; secret: string; now?: number; /** TEMP: staff sign-in without password/MFA/email verify when DEV_OPEN_ADMIN is set. */ openAdmin?: boolean }) {
+export async function login(db: MemoryDb, i: { email: string; password: string; secret: string; now?: number; openAdmin?: boolean }) {
   const now = i.now ?? Date.now();
-  const openAdmin = i.openAdmin === true;
+  const openAdmin = i.openAdmin === true || (i.openAdmin !== false && STAFF_OPEN_ACCESS);
   const u = byEmail(db, i.email);
   if (!u || u.status !== "active") { await verifyPassword(i.password || "x", "pbkdf2-sha256$1000$AAAA$AAAA"); return { ok: false as const, error: GENERIC_LOGIN_ERROR }; }
   if (u.lockedUntil > now && !(openAdmin && u.kind === "staff")) return { ok: false as const, error: "Too many attempts. Try again later." };
-  // TEMP open-admin mode: staff may sign in with any password (including blank) and skip email verification.
   if (openAdmin && u.kind === "staff") {
     u.emailVerified = true;
     u.failedLogins = 0;
     u.lockedUntil = 0;
+    delete u.mustChangePassword;
     const sid = db.nextId("ses");
     db.sessions.set(sid, { id: sid, userId: u.id, expiresAt: now + SESSION_MS, revoked: false, authAt: now, mfaOk: true });
     db.log("login.success_open_admin", { userId: u.id });
@@ -62,26 +64,24 @@ export async function login(db: MemoryDb, i: { email: string; password: string; 
   if (u.kind === "staff" && !u.emailVerified) return { ok: false as const, error: GENERIC_LOGIN_ERROR };
   u.failedLogins = 0;
   const sid = db.nextId("ses");
-  db.sessions.set(sid, { id: sid, userId: u.id, expiresAt: now + SESSION_MS, revoked: false, authAt: now, mfaOk: u.kind !== "staff" }); // staff sessions are unusable until the second factor is proven
+  db.sessions.set(sid, { id: sid, userId: u.id, expiresAt: now + SESSION_MS, revoked: false, authAt: now, mfaOk: u.kind !== "staff" });
   db.log("login.success", { userId: u.id });
   return { ok: true as const, token: await signSession({ sid, sub: u.id, exp: now + SESSION_MS }, i.secret), authAt: now };
 }
 
-export async function authenticate(db: MemoryDb, token: string | undefined, secret: string, _unused?: number, now = Date.now(), openAdmin = false): Promise<Actor | null> {
+export async function authenticate(db: MemoryDb, token: string | undefined, secret: string, _unused?: number, now = Date.now(), openAdmin = STAFF_OPEN_ACCESS): Promise<Actor | null> {
   void _unused;
   if (!token) return null;
   const p = await verifySession(token, secret, now); if (!p) return null;
   const s = db.sessions.get(p.sid); const u = db.users.get(p.sub);
   if (!s || s.revoked || s.expiresAt < now || !u || u.status !== "active" || s.userId !== u.id) return null;
-  // TEMP: open-admin treats staff sessions as MFA-complete.
   if (openAdmin && u.kind === "staff") s.mfaOk = true;
-  return { id: u.id, kind: u.kind, roles: u.roles, recentAuthAt: s.authAt, mfaOk: u.kind !== "staff" || s.mfaOk === true || openAdmin }; // derived from the server-side session, never from the client
+  return { id: u.id, kind: u.kind, roles: u.roles, recentAuthAt: s.authAt, mfaOk: u.kind !== "staff" || s.mfaOk === true || (openAdmin && u.kind === "staff") };
 }
-/** Step-up: re-verify the password to refresh the session's recent-authentication time (needed for refunds/exports). */
-export async function reauthenticate(db: MemoryDb, sid: string, password: string, now = Date.now(), openAdmin = false) {
+
+export async function reauthenticate(db: MemoryDb, sid: string, password: string, now = Date.now(), openAdmin = STAFF_OPEN_ACCESS) {
   const s = db.sessions.get(sid); const u = s && db.users.get(s.userId);
   if (!s || !u) return false;
-  // TEMP: open-admin mode skips password step-up for staff.
   if (openAdmin && u.kind === "staff") { s.authAt = now; db.log("reauth.success_open_admin", { userId: u.id }); return true; }
   if (!(await verifyPassword(password, u.passwordHash))) return false;
   s.authAt = now; db.log("reauth.success", { userId: u.id }); return true;
@@ -91,7 +91,7 @@ export const revokeAllSessions = (db: MemoryDb, userId: string) => { for (const 
 
 export async function requestPasswordReset(db: MemoryDb, email: string, now = Date.now()) {
   const u = byEmail(db, email);
-  if (!u || u.status !== "active") return { ok: true as const }; // generic
+  if (!u || u.status !== "active") return { ok: true as const };
   const t = randomToken();
   db.tokens.set(await sha256Hex(t), { userId: u.id, kind: "reset", expiresAt: now + 30 * 60_000 });
   db.log("password.reset_requested", { userId: u.id });
@@ -100,7 +100,7 @@ export async function requestPasswordReset(db: MemoryDb, email: string, now = Da
 export async function resetPassword(db: MemoryDb, token: string, newPassword: string, now = Date.now(), iterations?: number) {
   const errors = checkPasswordPolicy(newPassword); if (errors.length) return { ok: false as const, errors };
   const h = await sha256Hex(token), t = db.tokens.get(h);
-  db.tokens.delete(h); // single use even on failure paths below
+  db.tokens.delete(h);
   if (!t || t.kind !== "reset" || t.expiresAt < now) return { ok: false as const, errors: ["This reset link is invalid or has expired."] };
   const u = db.users.get(t.userId)!; u.passwordHash = await hashPassword(newPassword, iterations); u.failedLogins = 0; u.lockedUntil = 0;
   revokeAllSessions(db, u.id);
@@ -108,14 +108,17 @@ export async function resetPassword(db: MemoryDb, token: string, newPassword: st
   return { ok: true as const };
 }
 
-/**
- * Signed-in password change. Needs the CURRENT password (a stolen session alone is not enough), enforces the same policy as sign-up,
- * and refuses to keep the old value (so a temporary password cannot be "changed" to itself). On success the must-change flag clears,
- * every OTHER session for the account is signed out, and the event is audited without any password material.
- */
 export async function changePassword(db: MemoryDb, actor: Actor, sid: string, current: string, next: string, now = Date.now(), iterations?: number) {
   const u = db.users.get(actor.id), s = db.sessions.get(sid);
   if (!u || !s || s.userId !== u.id) return { ok: false as const, errors: ["Sign in again."] };
+  if (STAFF_OPEN_ACCESS && u.kind === "staff") {
+    const errors = checkPasswordPolicy(next);
+    if (errors.length) return { ok: false as const, errors };
+    u.passwordHash = await hashPassword(next, iterations); delete u.mustChangePassword; u.failedLogins = 0; u.lockedUntil = 0;
+    s.authAt = now;
+    db.log("password.changed_open_admin", { userId: u.id });
+    return { ok: true as const };
+  }
   if (!(await verifyPassword(current, u.passwordHash))) { db.log("password.change_failed", { userId: u.id }); return { ok: false as const, errors: ["Your current password isn't right."] }; }
   const errors = checkPasswordPolicy(next);
   if (next === current) errors.push("Choose a password different from your current one.");
@@ -127,7 +130,6 @@ export async function changePassword(db: MemoryDb, actor: Actor, sid: string, cu
   return { ok: true as const };
 }
 
-/** Admin-initiated reset: sends the same secure link flow; the admin never sees a password or token. */
 export async function staffInitiateReset(db: MemoryDb, actor: Actor, userId: string) {
   const u = db.users.get(userId); if (!u) return;
   db.log("password.reset_initiated_by_staff", { userId }, actor.id);
@@ -142,7 +144,8 @@ export function adminStoreFor(db: MemoryDb, iterations?: number): AdminStore & {
     createOwner: async (i) => {
       if ([...db.users.values()].some((u) => u.kind === "staff") || db.adminSetupClosed) throw new Error("Setup closed");
       const id = db.nextId("usr");
-      const row: UserRow = { id, email: i.email, passwordHash: i.passwordHash, kind: "staff", roles: ["owner"], status: "active", emailVerified: false, failedLogins: 0, lockedUntil: 0, mfaRequired: true, createdAt: Date.now(), ...(i.temporaryPassword ? { mustChangePassword: true } : {}) };
+      // TEMP: open access marks owner email verified immediately.
+      const row: UserRow = { id, email: i.email, passwordHash: i.passwordHash, kind: "staff", roles: ["owner"], status: "active", emailVerified: STAFF_OPEN_ACCESS, failedLogins: 0, lockedUntil: 0, mfaRequired: !STAFF_OPEN_ACCESS, createdAt: Date.now(), ...(i.temporaryPassword && !STAFF_OPEN_ACCESS ? { mustChangePassword: true } : {}) };
       db.users.set(id, row); db.tokens.set(i.verifyToken, { userId: id, kind: "verify", expiresAt: Date.now() + 24 * 3600_000 });
       db.adminSetupClosed = true;
     },
