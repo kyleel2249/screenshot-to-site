@@ -30,6 +30,31 @@ export const cheapestGhs = (p: StoreProduct) => (p.salePrice ?? p.price).GHS ?? 
  * Every word typed must appear somewhere in the product's name, SKU, short description or category (its own and its parent's name).
  * `categories` is optional so existing callers keep working; without it only name, SKU and description are searched.
  */
+/**
+ * Turns whatever was typed, pasted or imported as a product image into a URL the browser can actually load from any page:
+ *  - protocol-relative (`//cdn.x/y.jpg`) and `http://` links become `https://` (the shop is https-only, and the CSP only allows https images);
+ *  - an uploaded file key (`3fa…c9.jpg`) or `media/…` becomes `/media/…`;
+ *  - any other relative path is rooted at `/` so it never resolves against the current page (`/product/x/` + `img.jpg` = broken);
+ *  - empty or script-like values give "" so the caller shows the placeholder.
+ */
+export function imageSrc(raw: string | null | undefined): string {
+  let s = (raw ?? "").trim();
+  if (!s || /^(javascript|vbscript):/i.test(s)) return "";
+  if (/^data:image\/(png|jpe?g|gif|webp);/i.test(s)) return s;
+  if (/^data:/i.test(s)) return "";
+  if (s.startsWith("//")) s = `https:${s}`;
+  if (/^http:\/\//i.test(s)) s = `https://${s.slice(7)}`;
+  if (/^https:\/\//i.test(s)) return s;
+  if (/^[a-f0-9]{32}\.(jpg|png|webp|gif)$/i.test(s)) return `/media/${s}`;
+  return s.startsWith("/") ? s : `/${s}`;
+}
+/** Images on another site: loaded without a Referer so hosts that block "hotlinking" by referrer still serve them. */
+export const isExternalImage = (src: string) => /^https?:\/\//i.test(src);
+/** Neutral grey tile with a picture icon, shown when a product has no image or its image fails to load. */
+export const PLACEHOLDER_IMAGE = `data:image/svg+xml;utf8,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400"><rect width="400" height="400" fill="#eef0f4"/><g fill="none" stroke="#9aa3b5" stroke-width="10" stroke-linejoin="round" stroke-linecap="round"><rect x="110" y="130" width="180" height="140" rx="14"/><circle cx="160" cy="180" r="16"/><path d="M118 262l56-52 40 36 28-24 40 40"/></g></svg>',
+)}`;
+
 export function search(list: StoreProduct[], q: string, categories: CategoryNode[] = []): StoreProduct[] {
   const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return list;

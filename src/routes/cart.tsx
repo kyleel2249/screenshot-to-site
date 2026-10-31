@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Minus, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { ProductImage } from "@/components/ProductImage";
 import { useCart } from "@/lib/cart";
 import { useCatalog } from "@/lib/catalog-store";
 import { estimate, findByVariant } from "@/lib/storefront";
@@ -53,7 +54,7 @@ function Cart() {
             const priced = result.lines.find((x) => x.variantId === l.variantId);
             return (
               <li key={l.variantId} className="flex gap-4 py-5">
-                <img src={p.image} alt={p.imageAlt} width={96} height={96} className="h-24 w-24 rounded-lg object-cover" />
+                <ProductImage src={p.image} alt={p.imageAlt} width={96} height={96} className="h-24 w-24 rounded-lg object-cover" />
                 <div className="flex-1">
                   <Link to="/product/$slug" params={{ slug: p.slug }} className="font-medium hover:underline">{p.name}</Link>
                   {priced?.mode === "preorder" && <p className="text-sm text-muted-foreground">Pre-order · expected arrival {p.expectedWindow ?? "to be confirmed"} (estimate)</p>}

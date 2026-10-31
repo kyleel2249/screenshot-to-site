@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import type { StoreProduct } from "@/lib/storefront";
+import { imageSrc, isExternalImage, type StoreProduct } from "@/lib/storefront";
 
 function resolveMain(p: Pick<StoreProduct, "image" | "variantId">): string {
-  const raw = (p.image || "").trim();
+  const raw = imageSrc(p.image);
   if (raw && raw !== "/") return raw;
   const sku = p.variantId?.includes("::") ? p.variantId.split("::")[1] : "";
   return sku ? `/products/${sku}.png` : "";
@@ -20,7 +20,7 @@ const FALLBACK =
 /** Main image plus approved extra images. */
 export function ProductGallery({ p }: { p: Pick<StoreProduct, "image" | "imageAlt" | "gallery" | "variantId" | "name"> }) {
   const main = resolveMain(p);
-  const all = [{ url: main || FALLBACK, alt: p.imageAlt || p.name }, ...(p.gallery ?? []).map((g) => ({ url: g.url, alt: g.alt }))];
+  const all = [{ url: main || FALLBACK, alt: p.imageAlt || p.name }, ...(p.gallery ?? []).map((g) => ({ url: imageSrc(g.url) || FALLBACK, alt: g.alt }))];
   const [i, setI] = useState(0);
   const [broken, setBroken] = useState<Record<number, boolean>>({});
   useEffect(() => {
@@ -36,6 +36,7 @@ export function ProductGallery({ p }: { p: Pick<StoreProduct, "image" | "imageAl
         <img
           src={curSrc}
           alt={cur.alt}
+          {...(isExternalImage(curSrc) ? { referrerPolicy: "no-referrer" as const } : {})}
           width={816}
           height={816}
           className="h-full w-full object-contain p-4"
@@ -56,6 +57,7 @@ export function ProductGallery({ p }: { p: Pick<StoreProduct, "image" | "imageAl
                 <img
                   src={broken[n] ? FALLBACK : g.url}
                   alt=""
+                  {...(isExternalImage(broken[n] ? FALLBACK : g.url) ? { referrerPolicy: "no-referrer" as const } : {})}
                   loading="lazy"
                   width={64}
                   height={64}

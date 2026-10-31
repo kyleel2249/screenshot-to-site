@@ -3,14 +3,14 @@ import { useEffect, useState } from "react";
 import { Stars } from "@/components/Reviews";
 import { WishlistButton } from "@/components/WishlistButton";
 import { toast } from "sonner";
-import { displayPrice, isPurchasable, type StoreProduct } from "@/lib/storefront";
+import { displayPrice, imageSrc, isExternalImage, isPurchasable, type StoreProduct } from "@/lib/storefront";
 import { useCart } from "@/lib/cart";
 import { useCurrency } from "@/lib/currency";
 import { AVAILABILITY_LABEL, PROMO_LABEL } from "@/lib/domain/status";
 
 /** Prefer API image; fall back to static /products/<SKU>.png shipped with the app. */
 function resolveImage(p: StoreProduct): string {
-  const raw = (p.image || "").trim();
+  const raw = imageSrc(p.image); // https-ifies, roots relative paths, drops script-like values
   if (raw && raw !== "/") return raw;
   const sku = p.variantId.includes("::") ? p.variantId.split("::")[1] : "";
   if (sku) return `/products/${sku}.png`;
@@ -63,6 +63,7 @@ export function ProductCard({ p }: { p: StoreProduct }) {
         <img
           src={src}
           alt={p.imageAlt || p.name}
+          {...(isExternalImage(src) ? { referrerPolicy: "no-referrer" as const } : {})}
           loading="lazy"
           decoding="async"
           width={816}

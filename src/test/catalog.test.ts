@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SEED_CATEGORIES as categories } from "@/lib/domain/categories";
 import { business } from "@/lib/catalog";
 import { addLine } from "@/lib/cart-core";
-import { canAdd, cheapestGhs, displayPrice, estimate, productsIn, search, sortProducts, type StoreProduct } from "@/lib/storefront";
+import { PLACEHOLDER_IMAGE, canAdd, cheapestGhs, displayPrice, estimate, imageSrc, isExternalImage, productsIn, search, sortProducts, type StoreProduct } from "@/lib/storefront";
 
 const p = (o: Partial<StoreProduct> & { slug: string }): StoreProduct => ({
   name: o.slug, categoryId: "cat-phones-and-accessories--power-banks", createdAt: "2026-10-01T00:00:00Z", shortDescription: "s", image: "/i.jpg", imageAlt: "a",
@@ -40,6 +40,21 @@ describe("storefront helpers", () => {
     expect(search(items, cat.name, categories).map((x) => x.slug)).toEqual(["duffel"]);
     expect(search(items, parent.name, categories).map((x) => x.slug)).toEqual(["duffel"]);
     expect(search(items, cat.name).length).toBe(0); // category names only searched when the tree is supplied
+  });
+  it("cleans product image links so they load from any page", () => {
+    const key = "0123456789abcdef0123456789abcdef.jpg";
+    expect(imageSrc("https://cdn.example.com/a b.jpg")).toBe("https://cdn.example.com/a b.jpg");
+    expect(imageSrc("  http://cdn.example.com/a.jpg ")).toBe("https://cdn.example.com/a.jpg"); // https-only shop; CSP allows https images only
+    expect(imageSrc("//cdn.example.com/a.jpg")).toBe("https://cdn.example.com/a.jpg");
+    expect(imageSrc(`/media/${key}`)).toBe(`/media/${key}`);
+    expect(imageSrc(key)).toBe(`/media/${key}`); // bare upload key
+    expect(imageSrc(`media/${key}`)).toBe(`/media/${key}`);
+    expect(imageSrc("images/tote.jpg")).toBe("/images/tote.jpg"); // never resolves against /product/<slug>/
+    expect(imageSrc("data:image/png;base64,AAAA")).toBe("data:image/png;base64,AAAA");
+    for (const bad of ["", "   ", null, undefined, "javascript:alert(1)", "data:text/html;base64,AAAA", "DATA:text/html,x"]) expect(imageSrc(bad as string | null | undefined)).toBe("");
+    expect(isExternalImage("https://x.test/a.jpg")).toBe(true);
+    expect(isExternalImage("/media/a.jpg")).toBe(false);
+    expect(PLACEHOLDER_IMAGE.startsWith("data:image/svg+xml")).toBe(true);
   });
   it("shows both independently set prices in dual mode and never converts without a rate", () => {
     expect(displayPrice(list[0]!, "DUAL").current.map((c) => c.text)).toEqual(["GH₵ 980.00", "US$ 63.00"]);

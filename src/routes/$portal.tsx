@@ -13,6 +13,7 @@ import { GHANA_REGIONS } from "@/lib/domain/regions";
 import { AVAILABILITY_LABEL, type Availability } from "@/lib/domain/status";
 import { labelOf, nextStatuses } from "@/lib/order-labels";
 import { Errors, Field, inputCls, Notice } from "@/components/Form";
+import { ProductImage } from "@/components/ProductImage";
 
 /**
  * Staff dashboard. Mounted on a secret, owner-configured path segment (never "admin"). The segment is a URL parameter, not
@@ -768,10 +769,10 @@ function ImageManager({ admin, products }: { admin: Admin; products: AdminProduc
         <div className="mt-4 space-y-4">
           <Errors errors={errors} />{msg && <Notice>{msg}</Notice>}
           {data && <ul className="grid gap-3 sm:grid-cols-2">
-            <li className="flex gap-3 rounded-lg border border-gold p-2 text-sm"><img src={data.primary.url} alt="" width={64} height={64} className="h-16 w-16 rounded object-cover" /><div><strong>Main image</strong><br /><span className="text-muted-foreground">{data.primary.alt}</span></div></li>
+            <li className="flex gap-3 rounded-lg border border-gold p-2 text-sm"><ProductImage src={data.primary.url} alt="" width={64} height={64} className="h-16 w-16 rounded object-cover" /><div><strong>Main image</strong><br /><span className="text-muted-foreground">{data.primary.alt}</span></div></li>
             {data.items.filter((m) => m.kind !== "previous" || m.url !== data.primary.url).map((m) => (
               <li key={m.id} className="flex gap-3 rounded-lg border border-border p-2 text-sm">
-                <img src={m.url} alt="" width={64} height={64} loading="lazy" className="h-16 w-16 rounded object-cover" />
+                <ProductImage src={m.url} alt="" width={64} height={64} loading="lazy" className="h-16 w-16 rounded object-cover" />
                 <div className="min-w-0 flex-1"><div className="truncate">{m.alt}</div>
                   <div className="text-xs text-muted-foreground">{m.kind === "illustrative" ? "Illustration" : m.kind === "verified" ? "Verified photo" : "Previous main image"} · {m.status}{m.canvaDesignId ? ` · Canva ${m.canvaDesignId}` : ""}</div>
                   <div className="mt-1 flex flex-wrap gap-2">
