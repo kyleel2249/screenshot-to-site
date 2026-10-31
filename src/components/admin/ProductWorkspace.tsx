@@ -4,7 +4,6 @@ import { topLevel, childrenOf } from "@/lib/domain/categories";
 import { Field, inputCls, Errors } from "@/components/Form";
 import { suggestSku, suggestSlug, suggestShortDescription, suggestImageAlt } from "@/lib/admin-sku";
 
-/** Default GHS per 1 USD when no approved rate is loaded (owner should set real rate in Pricing). */
 const FALLBACK_RATE = 11.47;
 
 export type ProductFormState = {
@@ -48,7 +47,6 @@ export function ProductWorkspace({
   ghsPerUsd?: number;
   busy: boolean;
   onSave: (body: Record<string, unknown>) => Promise<void>;
-  /** Upload binary to R2 (or data-URL fallback); returns permanent URL for the product record. */
   onUploadImage?: (file: Blob) => Promise<{ ok: true; url: string } | { ok: false; error: string }>;
 }) {
   const [form, setForm] = useState<ProductFormState>(empty);
@@ -58,6 +56,7 @@ export function ProductWorkspace({
   const [tilt, setTilt] = useState({ x: 0, y: 0 });
   const [uploading, setUploading] = useState(false);
   const [uploadNote, setUploadNote] = useState("");
+  const [saving, setSaving] = useState(false);
   const objectUrlRef = useRef<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -105,9 +104,7 @@ export function ProductWorkspace({
     setForm((f) => {
       const next = { ...f, priceGhsMajor: v };
       const n = parseFloat(v);
-      if (v.trim() && !Number.isNaN(n) && ghsPerUsd > 0) {
-        next.priceUsdMajor = (n / ghsPerUsd).toFixed(2);
-      }
+      if (v.trim() && !Number.isNaN(n) && ghsPerUsd > 0) next.priceUsdMajor = (n / ghsPerUsd).toFixed(2);
       return next;
     });
   }
@@ -117,9 +114,7 @@ export function ProductWorkspace({
     setForm((f) => {
       const next = { ...f, priceUsdMajor: v };
       const n = parseFloat(v);
-      if (v.trim() && !Number.isNaN(n) && ghsPerUsd > 0) {
-        next.priceGhsMajor = (n * ghsPerUsd).toFixed(2);
-      }
+      if (v.trim() && !Number.isNaN(n) && ghsPerUsd > 0) next.priceGhsMajor = (n * ghsPerUsd).toFixed(2);
       return next;
     });
   }
@@ -140,8 +135,6 @@ export function ProductWorkspace({
     }
     setLocalErrors([]);
     setUploadNote("");
-
-    // Instant local preview
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     const localUrl = URL.createObjectURL(file);
     objectUrlRef.current = localUrl;
@@ -150,12 +143,10 @@ export function ProductWorkspace({
       image: localUrl,
       imageAlt: f.imageAlt.trim() || suggestImageAlt(f.name || file.name.replace(/\.[^.]+$/, ""), categoryName),
     }));
-
     if (!onUploadImage) {
-      setUploadNote("Preview only — server upload not wired; image may not persist on save.");
+      setUploadNote("Preview only — server upload not wired.");
       return;
     }
-
     setUploading(true);
     try {
       const result = await onUploadImage(file);
@@ -165,16 +156,64 @@ export function ProductWorkspace({
           objectUrlRef.current = null;
         }
         setForm((f) => ({ ...f, image: result.url }));
-        setUploadNote("Image uploaded and linked to this product.");
+        setUploadNote("Image uploaded and linked.");
       } else {
         setUploadNote(result.error);
         setLocalErrors([result.error]);
       }
     } catch {
-      setUploadNote("Upload failed. Preview still shows your file until you try again.");
+      setUploadNote("Upload failed. You can still save with a placeholder image.");
     }
     setUploading(false);
   }
+
+  async function submitForm() {
+    const err: string[] = [];
+    if (!form.name.trim()) err.push("Name is required");
+    if (!form.sku.trim()) err.push("SKU is required");
+    if (!form.categoryId) err.push("Category is required");
+    if (err.length) {
+      setLocalErrors(err);
+      return;
+    }
+    setLocalErrors([]);
+    const ghsRaw = form.priceGhsMajor.trim() ? Math.round(parseFloat(form.priceGhsMajor) * 100) : undefined;
+    const usdRaw = form.priceUsdMajor.trim() ? Math.round(parseFloat(form.priceUsdMajor) * 100) : undefined;
+    const ghs = ghsRaw !== undefined && Number.isFinite(ghsRaw) ? ghsRaw : undefined;
+    const usd = usdRaw !== undefined && Number.isFinite(usdRaw) ? usdRaw : undefined;
+    let image = form.image.trim() || "/products/placeholder.png";
+    if (image.startsWith("blob:")) image = "/products/placeholder.png";
+
+    setSaving(true);
+    try {
+      await onSave({
+        name: form.name.trim(),
+        sku: form.sku.trim(),
+        categoryId: form.categoryId,
+        shortDescription: form.shortDescription.trim() || form.name.trim(),
+        image,
+        imageAlt: form.imageAlt.trim() || form.name.trim(),
+        priceGhs: ghs,
+        priceUsd: usd,
+        onHand: parseInt(form.onHand, 10) || 0,
+        published: form.published,
+        availability: form.availability,
+      });
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+      setForm({ ...empty, categoryId: form.categoryId });
+      setSkuLocked(false);
+      setPriceSource(null);
+      setUploadNote("");
+    } catch (ex) {
+      setLocalErrors([ex instanceof Error ? ex.message : "Save failed. Try again."]);
+    }
+    setSaving(false);
+  }
+
+  const locked = busy || uploading || saving;
 
   return (
     <div className="grid gap-8 xl:grid-cols-[1fr_minmax(280px,380px)]">
@@ -182,7 +221,7 @@ export function ProductWorkspace({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="font-display text-xl font-bold text-primary">Add product</h2>
-            <p className="text-sm text-muted-foreground">Live preview updates as you type. SKU and copy are suggested automatically.</p>
+            <p className="text-sm text-muted-foreground">Live preview updates as you type. Enter a name and at least one price to publish.</p>
           </div>
           <button type="button" className="rounded-full border border-border px-3 py-1.5 text-xs font-medium hover:bg-gold/15" onClick={regenerateCopy}>
             Regenerate description & alt
@@ -193,38 +232,7 @@ export function ProductWorkspace({
           className="grid gap-3 sm:grid-cols-2"
           onSubmit={(e) => {
             e.preventDefault();
-            const err: string[] = [];
-            if (!form.name.trim()) err.push("Name is required");
-            if (!form.sku.trim()) err.push("SKU is required");
-            if (!form.categoryId) err.push("Category is required");
-            if (form.image.startsWith("blob:")) {
-              err.push("Wait for image upload to finish, or re-upload the image.");
-            }
-            if (err.length) {
-              setLocalErrors(err);
-              return;
-            }
-            setLocalErrors([]);
-            const ghs = form.priceGhsMajor.trim() ? Math.round(parseFloat(form.priceGhsMajor) * 100) : undefined;
-            const usd = form.priceUsdMajor.trim() ? Math.round(parseFloat(form.priceUsdMajor) * 100) : undefined;
-            void onSave({
-              name: form.name.trim(),
-              sku: form.sku.trim(),
-              categoryId: form.categoryId,
-              shortDescription: form.shortDescription.trim() || form.name.trim(),
-              image: form.image.trim() || "/products/placeholder.png",
-              imageAlt: form.imageAlt.trim() || form.name.trim(),
-              priceGhs: ghs,
-              priceUsd: usd,
-              onHand: parseInt(form.onHand, 10) || 0,
-              published: form.published,
-              availability: form.availability,
-            }).then(() => {
-              setForm({ ...empty, categoryId: form.categoryId });
-              setSkuLocked(false);
-              setPriceSource(null);
-              setUploadNote("");
-            });
+            void submitForm();
           }}
         >
           <div className="sm:col-span-2">
@@ -280,17 +288,11 @@ export function ProductWorkspace({
             </select>
           </div>
           <div className="sm:col-span-2">
-            <Field
-              label="Short description"
-              value={form.shortDescription}
-              onChange={(e) => setForm((f) => ({ ...f, shortDescription: e.target.value }))}
-            />
+            <Field label="Short description" value={form.shortDescription} onChange={(e) => setForm((f) => ({ ...f, shortDescription: e.target.value }))} />
           </div>
-
-          {/* Image upload */}
           <div className="sm:col-span-2 rounded-xl border border-dashed border-border bg-secondary/40 p-4">
             <p className="text-sm font-medium text-primary">Product image</p>
-            <p className="mt-1 text-xs text-muted-foreground">JPEG, PNG, WebP or GIF · max ~3 MB. Preview updates immediately.</p>
+            <p className="mt-1 text-xs text-muted-foreground">JPEG, PNG, WebP or GIF · max ~3 MB.</p>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <input
                 ref={fileRef}
@@ -300,43 +302,30 @@ export function ProductWorkspace({
                 id="ws-image-file"
                 onChange={(e) => void handleFile(e.target.files?.[0])}
               />
-              <button
-                type="button"
-                disabled={uploading || busy}
-                className="btn-primary text-sm"
-                onClick={() => fileRef.current?.click()}
-              >
+              <button type="button" disabled={locked} className="btn-primary text-sm" onClick={() => fileRef.current?.click()}>
                 {uploading ? "Uploading…" : "Upload image"}
               </button>
               <span className="text-xs text-muted-foreground">or paste a URL below</span>
             </div>
             {uploadNote && <p className="mt-2 text-xs text-muted-foreground">{uploadNote}</p>}
           </div>
-
           <Field label="Image URL" value={form.image.startsWith("blob:") ? "" : form.image} onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))} />
           <Field label="Image alt text" value={form.imageAlt} onChange={(e) => setForm((f) => ({ ...f, imageAlt: e.target.value }))} />
           <div>
             <Field label="Price (GHS)" type="number" step="0.01" min="0" value={form.priceGhsMajor} onChange={(e) => onGhs(e.target.value)} />
-            {priceSource === "usd" && <p className="mt-1 text-xs text-muted-foreground">Converted from USD</p>}
           </div>
           <div>
             <Field label="Price (USD)" type="number" step="0.01" min="0" value={form.priceUsdMajor} onChange={(e) => onUsd(e.target.value)} />
-            {priceSource === "ghs" && <p className="mt-1 text-xs text-muted-foreground">Converted from GHS</p>}
           </div>
           <p className="sm:col-span-2 text-xs text-muted-foreground">
-            Rate: 1 USD = {ghsPerUsd.toFixed(2)} GHS {ghsPerUsd === FALLBACK_RATE ? "(default — set approved rate in Pricing when available)" : ""}
+            Rate: 1 USD = {ghsPerUsd.toFixed(2)} GHS. Publish needs at least one price (or product is saved as draft).
           </p>
           <Field label="Stock" type="number" min="0" value={form.onHand} onChange={(e) => setForm((f) => ({ ...f, onHand: e.target.value }))} />
           <div>
             <label className="mb-1 block text-sm font-medium" htmlFor="ws-av">
               Availability
             </label>
-            <select
-              id="ws-av"
-              className={inputCls}
-              value={form.availability}
-              onChange={(e) => setForm((f) => ({ ...f, availability: e.target.value }))}
-            >
+            <select id="ws-av" className={inputCls} value={form.availability} onChange={(e) => setForm((f) => ({ ...f, availability: e.target.value }))}>
               <option value="available">In stock</option>
               <option value="pre_order">Pre-order</option>
               <option value="coming_soon">Coming soon</option>
@@ -349,8 +338,8 @@ export function ProductWorkspace({
             Publish immediately
           </label>
           <div className="sm:col-span-2 flex flex-wrap gap-2 pt-2">
-            <button type="submit" disabled={busy || uploading} className="btn-primary">
-              {busy ? "Saving…" : "Save product"}
+            <button type="submit" disabled={locked} className="btn-primary">
+              {saving || busy ? "Saving…" : "Save product"}
             </button>
             <button
               type="button"
@@ -364,6 +353,7 @@ export function ProductWorkspace({
                 setSkuLocked(false);
                 setPriceSource(null);
                 setUploadNote("");
+                setLocalErrors([]);
               }}
             >
               Reset
@@ -398,14 +388,9 @@ export function ProductWorkspace({
                 className="h-full w-full object-contain p-4"
                 style={{ transform: "translateZ(24px)" }}
               />
-              {uploading && (
+              {(uploading || saving) && (
                 <span className="absolute inset-x-0 bottom-0 bg-primary/80 py-1 text-center text-[10px] font-medium text-primary-foreground">
-                  Uploading…
-                </span>
-              )}
-              {form.published && (
-                <span className="absolute left-3 top-3 rounded-full bg-primary px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gold">
-                  Published
+                  {uploading ? "Uploading…" : "Saving…"}
                 </span>
               )}
             </div>
@@ -433,7 +418,6 @@ export function ProductWorkspace({
             </div>
           </article>
         </div>
-        <p className="mt-3 text-xs text-muted-foreground">Hover for 3D tilt. Image updates as soon as you choose a file.</p>
       </aside>
     </div>
   );
