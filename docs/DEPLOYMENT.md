@@ -41,6 +41,11 @@ wrangler secret put BANK_TRANSFER_DETAILS
 `POST https://<site>/<ADMIN_PORTAL_PATH>/api/enrol` with `{reference,email,password}`. It works once, only while no staff account exists, then
 closes permanently. Verify the owner email via the emailed link, then log in. The reference is never stored or logged.
 
+**Handing over with a temporary password.** Add `"temporaryPassword": true` to the enrol request (or tick "This is a temporary password" on the enrolment form). The account is then locked to a
+"Choose a new password" step: after sign-in, every dashboard call (including two-step setup) is refused with `password_change_required` until the owner sets their own password.
+The change needs the current password, follows the normal policy (12+ characters, upper and lower case, a number **and a symbol**), cannot equal the old password, and signs out all other sessions of that account.
+Send the temporary password over a different channel from the enrolment reference, and never commit it. It only has to survive until the first sign-in.
+
 ## 5. Build and deploy
 `src/server.ts` is already wired: with the `DB`, `SESSION_SECRET` and `SITE_ORIGIN` bindings present it routes everything through `src/server/edge.ts` (API, generated sitemap/robots, per-product SEO tags, security headers, CSP). Then:
 ```

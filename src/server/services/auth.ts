@@ -92,6 +92,25 @@ export async function resetPassword(db: MemoryDb, token: string, newPassword: st
   return { ok: true as const };
 }
 
+/**
+ * Signed-in password change. Needs the CURRENT password (a stolen session alone is not enough), enforces the same policy as sign-up,
+ * and refuses to keep the old value (so a temporary password cannot be "changed" to itself). On success the must-change flag clears,
+ * every OTHER session for the account is signed out, and the event is audited without any password material.
+ */
+export async function changePassword(db: MemoryDb, actor: Actor, sid: string, current: string, next: string, now = Date.now(), iterations?: number) {
+  const u = db.users.get(actor.id), s = db.sessions.get(sid);
+  if (!u || !s || s.userId !== u.id) return { ok: false as const, errors: ["Sign in again."] };
+  if (!(await verifyPassword(current, u.passwordHash))) { db.log("password.change_failed", { userId: u.id }); return { ok: false as const, errors: ["Your current password isn't right."] }; }
+  const errors = checkPasswordPolicy(next);
+  if (next === current) errors.push("Choose a password different from your current one.");
+  if (errors.length) return { ok: false as const, errors };
+  u.passwordHash = await hashPassword(next, iterations); delete u.mustChangePassword; u.failedLogins = 0; u.lockedUntil = 0;
+  for (const x of db.sessions.values()) if (x.userId === u.id && x.id !== sid) x.revoked = true;
+  s.authAt = now;
+  db.log("password.changed", { userId: u.id });
+  return { ok: true as const };
+}
+
 /** Admin-initiated reset: sends the same secure link flow; the admin never sees a password or token. */
 export async function staffInitiateReset(db: MemoryDb, actor: Actor, userId: string) {
   const u = db.users.get(userId); if (!u) return;
@@ -107,7 +126,7 @@ export function adminStoreFor(db: MemoryDb, iterations?: number): AdminStore & {
     createOwner: async (i) => {
       if ([...db.users.values()].some((u) => u.kind === "staff") || db.adminSetupClosed) throw new Error("Setup closed");
       const id = db.nextId("usr");
-      const row: UserRow = { id, email: i.email, passwordHash: i.passwordHash, kind: "staff", roles: ["owner"], status: "active", emailVerified: false, failedLogins: 0, lockedUntil: 0, mfaRequired: true, createdAt: Date.now() };
+      const row: UserRow = { id, email: i.email, passwordHash: i.passwordHash, kind: "staff", roles: ["owner"], status: "active", emailVerified: false, failedLogins: 0, lockedUntil: 0, mfaRequired: true, createdAt: Date.now(), ...(i.temporaryPassword ? { mustChangePassword: true } : {}) };
       db.users.set(id, row); db.tokens.set(i.verifyToken, { userId: id, kind: "verify", expiresAt: Date.now() + 24 * 3600_000 });
       db.adminSetupClosed = true;
     },

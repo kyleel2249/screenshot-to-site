@@ -32,15 +32,16 @@ const AVAIL = Object.keys(AVAILABILITY_LABEL) as Availability[];
 function Dashboard() {
   const { portal } = Route.useParams();
   const admin = useMemo(() => api.admin(`/${portal}`), [portal]);
-  const [state, setState] = useState<"checking" | "enrol" | "login" | "mfa-setup" | "mfa-code" | "in" | "missing">("checking");
+  const [state, setState] = useState<"checking" | "enrol" | "login" | "new-password" | "mfa-setup" | "mfa-code" | "in" | "missing">("checking");
   const [roles, setRoles] = useState<string[]>([]);
   const [tab, setTab] = useState<Tab>("overview");
 
-  const check = useCallback(async () => { const r = await admin.me(); if (r.ok && r.data) { setRoles(r.data.roles); setState(r.data.mfa === "verified" ? "in" : r.data.mfa === "setup_required" ? "mfa-setup" : "mfa-code"); } else setState(r.status === 401 || r.status === 404 ? "login" : "missing"); }, [admin]);
+  const check = useCallback(async () => { const r = await admin.me(); if (r.ok && r.data) { setRoles(r.data.roles); setState(r.data.mustChangePassword ? "new-password" : r.data.mfa === "verified" ? "in" : r.data.mfa === "setup_required" ? "mfa-setup" : "mfa-code"); } else setState(r.status === 401 || r.status === 404 ? "login" : "missing"); }, [admin]);
   useEffect(() => { void check(); }, [check]);
 
   if (state === "checking") return <div className="container-x py-16"><Notice>Loading…</Notice></div>;
   if (state === "missing") return <div className="container-x py-16"><Notice>Page not found.</Notice></div>;
+  if (state === "new-password") return <NewPassword admin={admin} onDone={check} />;
   if (state === "mfa-setup") return <MfaSetup admin={admin} onDone={check} />;
   if (state === "mfa-code") return <MfaCode admin={admin} onDone={check} />;
   if (state === "login" || state === "enrol") return <Gate admin={admin} mode={state} setMode={setState} onDone={check} />;
@@ -61,11 +62,11 @@ function Dashboard() {
 type Admin = ReturnType<typeof api.admin>;
 
 function Gate({ admin, mode, setMode, onDone }: { admin: Admin; mode: "login" | "enrol"; setMode: (m: "login" | "enrol") => void; onDone: () => void }) {
-  const [f, setF] = useState({ email: "", password: "", reference: "" }); const [errors, setErrors] = useState<string[]>([]); const [note, setNote] = useState("");
+  const [f, setF] = useState({ email: "", password: "", reference: "" }); const [temp, setTemp] = useState(false); const [errors, setErrors] = useState<string[]>([]); const [note, setNote] = useState("");
   async function go(e: React.FormEvent) {
     e.preventDefault(); setErrors([]); setNote("");
     if (mode === "login") { const r = await api.login(f.email.trim(), f.password); if (r.ok) { setF({ ...f, password: "" }); onDone(); } else setErrors(r.errors); return; }
-    const r = await admin.enrol({ reference: f.reference, email: f.email.trim(), password: f.password });
+    const r = await admin.enrol({ reference: f.reference, email: f.email.trim(), password: f.password, ...(temp ? { temporaryPassword: true } : {}) });
     if (r.ok) { setF({ email: f.email, password: "", reference: "" }); setNote("Owner account created. Verify the email we sent, then sign in."); setMode("login"); } else setErrors(["Enrolment is unavailable or the details were rejected."]);
   }
   return (
@@ -75,6 +76,12 @@ function Gate({ admin, mode, setMode, onDone }: { admin: Admin; mode: "login" | 
         <Errors errors={errors} />{note && <Notice>{note}</Notice>}
         <Field label="Email" type="email" autoComplete="username" required value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
         <Field label="Password" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} required value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
+        {mode === "enrol" && (
+          <label className="flex items-start gap-2 text-sm">
+            <input type="checkbox" className="mt-1" checked={temp} onChange={(e) => setTemp(e.target.checked)} />
+            <span>This is a temporary password. Require a new one at first sign-in.</span>
+          </label>
+        )}
         {mode === "enrol" && <Field label="Enrolment reference" type="password" autoComplete="off" required value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} />}
         <button className="btn-primary w-full">{mode === "login" ? "Sign in" : "Create owner account"}</button>
       </form>
@@ -475,6 +482,29 @@ function MfaSetup({ admin, onDone }: { admin: Admin; onDone: () => void }) {
           <p className="text-sm">2. Enter the 6-digit code it shows:</p></>}
         <Field label="6-digit code" inputMode="numeric" autoComplete="one-time-code" maxLength={6} required value={code} onChange={(e) => setCode(e.target.value)} />
         <button className="btn-primary w-full" disabled={!info}>Turn on two-step verification</button>
+      </form>
+    </div>
+  );
+}
+/** Shown after a sign-in with a temporary password. Nothing else in the dashboard works until a new password is chosen. */
+function NewPassword({ admin, onDone }: { admin: Admin; onDone: () => void }) {
+  const [f, setF] = useState({ current: "", next: "", again: "" }); const [errors, setErrors] = useState<string[]>([]); const [busy, setBusy] = useState(false);
+  async function submit(e: React.FormEvent) {
+    e.preventDefault(); setErrors([]);
+    if (f.next !== f.again) { setErrors(["The two new passwords don't match."]); return; }
+    setBusy(true); const r = await admin.changePassword({ currentPassword: f.current, newPassword: f.next }); setBusy(false);
+    if (r.ok) { setF({ current: "", next: "", again: "" }); onDone(); } else setErrors(r.errors);
+  }
+  return (
+    <div className="container-x max-w-md py-16">
+      <h1 className="font-display text-2xl font-bold">Choose a new password</h1>
+      <p className="mt-2 text-sm text-muted-foreground">You signed in with a temporary password. Set your own now to continue. At least 12 characters, with upper- and lower-case letters, a number and a symbol.</p>
+      <form className="mt-6 space-y-4" noValidate onSubmit={(e) => void submit(e)}>
+        <Errors errors={errors} />
+        <Field label="Temporary password" type="password" autoComplete="current-password" required value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} />
+        <Field label="New password" type="password" autoComplete="new-password" required value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} />
+        <Field label="Repeat new password" type="password" autoComplete="new-password" required value={f.again} onChange={(e) => setF({ ...f, again: e.target.value })} />
+        <button className="btn-primary w-full" disabled={busy}>{busy ? "Saving…" : "Save new password"}</button>
       </form>
     </div>
   );

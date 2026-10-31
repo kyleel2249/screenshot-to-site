@@ -15,7 +15,7 @@ export interface AdminStore {
   adminCount(): Promise<number>;
   isSetupClosed(): Promise<boolean>;
   /** Atomically: insert owner (emailVerified=false), close setup, write audit record. Must fail if an admin exists. */
-  createOwner(input: { email: string; passwordHash: string; verifyToken: string }): Promise<void>;
+  createOwner(input: { email: string; passwordHash: string; verifyToken: string; temporaryPassword?: boolean }): Promise<void>;
   audit(event: string, detail: Record<string, string | number | boolean>): Promise<void>;
 }
 
@@ -29,7 +29,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export async function enrolOwner(
   store: AdminStore,
   env: { ADMIN_BOOTSTRAP_REF_HASH?: string },
-  input: { reference: string; email: string; password: string; clientKey: string },
+  input: { reference: string; email: string; password: string; clientKey: string; /** The password is a handover value: the owner must choose their own at first sign-in. */ temporaryPassword?: boolean },
 ): Promise<EnrolmentResult> {
   if (!limiter.check(input.clientKey).allowed) { await store.audit("enrol.rate_limited", { key: input.clientKey }); return { ok: false, code: "rate_limited" }; }
   // Generic failure for every precondition so the endpoint reveals nothing about setup state.
@@ -46,8 +46,8 @@ export async function enrolOwner(
   const errors = checkPasswordPolicy(input.password);
   if (errors.length) return { ok: false, code: "weak_password", errors };
   const verifyToken = randomToken();
-  await store.createOwner({ email: input.email.toLowerCase(), passwordHash: await hashPassword(input.password), verifyToken: await sha256Hex(verifyToken) });
-  await store.audit("enrol.completed", { email: input.email.toLowerCase() }); // never the reference or password
+  await store.createOwner({ email: input.email.toLowerCase(), passwordHash: await hashPassword(input.password), verifyToken: await sha256Hex(verifyToken), ...(input.temporaryPassword ? { temporaryPassword: true } : {}) });
+  await store.audit("enrol.completed", { email: input.email.toLowerCase(), temporaryPassword: !!input.temporaryPassword }); // never the reference or password
   return { ok: true, verifyToken }; // emailed to the owner; only its hash is stored
 }
 

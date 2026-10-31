@@ -24,7 +24,7 @@ import type { MemoryDb } from "./db";
 import { Forbidden, requirePermission, type Actor } from "./rbac";
 import { ConflictError, transact, type Persistence } from "./persistence/transact";
 import { getCart, saveCart, setWishlist, addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
-import { adminStoreFor, authenticate, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
+import { adminStoreFor, authenticate, changePassword, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
 import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
 import { createPurchaseOrder, listPurchaseOrders, listSuppliers, receivePurchaseOrder, saveSupplier, setPurchaseOrderStatus } from "./services/purchasing";
 import { listForModeration, listPublished, moderate, submitReview, summary } from "./services/reviews";
@@ -176,7 +176,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       const sub = path.slice(portal.length + 4) || "/";
       if (sub === "/enrol" && req.method === "POST") {
         if (!limiters.enrol.check(ip).allowed) return json({ error: "Too many requests" }, 429);
-        const r = await transact(p, async (db) => enrolOwner(adminStoreFor(db), env.ADMIN_BOOTSTRAP_REF_HASH ? { ADMIN_BOOTSTRAP_REF_HASH: env.ADMIN_BOOTSTRAP_REF_HASH } : {}, { reference: str(body, "reference"), email: str(body, "email"), password: str(body, "password"), clientKey: ip }));
+        const r = await transact(p, async (db) => enrolOwner(adminStoreFor(db), env.ADMIN_BOOTSTRAP_REF_HASH ? { ADMIN_BOOTSTRAP_REF_HASH: env.ADMIN_BOOTSTRAP_REF_HASH } : {}, { reference: str(body, "reference"), email: str(body, "email"), password: str(body, "password"), clientKey: ip, temporaryPassword: body["temporaryPassword"] === true }));
         if (!r.ok) return json({ error: r.code === "weak_password" ? "Password too weak" : "Enrolment unavailable", ...(r.errors ? { errors: r.errors } : {}) }, r.code === "weak_password" ? 422 : 404);
         await deps.mail?.(str(body, "email"), "owner_verify", { token: r.verifyToken });
         return json({ ok: true });
@@ -185,7 +185,17 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       if (!actor || actor.kind !== "staff") return notFound(); // unauthenticated probes learn nothing
       try {
         const mfa = await transact(p, (db) => mfaState(db, actor, sid!));
-        if (sub === "/me" && req.method === "GET") return json({ id: actor.id, roles: mfa === "verified" ? actor.roles : [], mfa });
+        // A temporary password (handover) must be replaced before anything else works: only "who am I" and "change password" are reachable.
+        const mustChange = await transact(p, (db) => !!db.users.get(actor.id)?.mustChangePassword);
+        if (sub === "/me" && req.method === "GET") return json({ id: actor.id, roles: mfa === "verified" && !mustChange ? actor.roles : [], mfa, mustChangePassword: mustChange });
+        if (sub === "/password/change" && req.method === "POST") {
+          // Without a pending forced change this needs the full sign-in (second factor proven) so a bare password can't be used to lock the owner out.
+          if (!mustChange && mfa !== "verified") return json({ error: "Two-step verification required" }, 403);
+          if (!limiters.auth.check(`pw:${actor.id}`).allowed) return json({ error: "Too many attempts. Try again later." }, 429);
+          const r = await transact(p, (db) => changePassword(db, actor, sid!, str(body, "currentPassword"), str(body, "newPassword"), Date.now(), iterations));
+          return r.ok ? json({ ok: true }) : json({ errors: r.errors }, 422);
+        }
+        if (mustChange) return json({ error: "Password change required", code: "password_change_required" }, 403);
         if (sub === "/mfa/setup" && req.method === "POST") return json(await transact(p, (db) => startMfaSetup(db, actor, encKey)));
         if (sub === "/mfa/confirm" && req.method === "POST") {
           if (!limiters.auth.check(`mfa:${actor.id}`).allowed) return json({ error: "Too many attempts. Try again later." }, 429);

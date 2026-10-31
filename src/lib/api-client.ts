@@ -83,8 +83,9 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     startBankTransfer: (orderRef: string, trackingSecret?: string) => post<BankTransferInstructions>("/api/payments/bank-transfer", { orderRef, ...(trackingSecret ? { trackingSecret } : {}) }),
     track: (ref: string, secret: string) => get<TrackResult>(`/api/track?ref=${encodeURIComponent(ref)}&secret=${encodeURIComponent(secret)}`),
     admin: (portal: string) => ({
-      enrol: (b: { reference: string; email: string; password: string }) => post<{ ok: true }>(`${portal}/api/enrol`, b),
-      me: () => get<{ id: string; roles: string[]; mfa: "setup_required" | "code_required" | "verified" }>(`${portal}/api/me`),
+      enrol: (b: { reference: string; email: string; password: string; temporaryPassword?: boolean }) => post<{ ok: true }>(`${portal}/api/enrol`, b),
+      me: () => get<{ id: string; roles: string[]; mfa: "setup_required" | "code_required" | "verified"; mustChangePassword?: boolean }>(`${portal}/api/me`),
+      changePassword: (b: { currentPassword: string; newPassword: string }) => post<{ ok: true }>(`${portal}/api/password/change`, b),
       mfaSetup: () => post<{ secret: string; otpauth: string }>(`${portal}/api/mfa/setup`),
       mfaConfirm: (code: string) => post<{ recoveryCodes: string[] }>(`${portal}/api/mfa/confirm`, { code }),
       mfaVerify: (code: string) => post<{ ok: true }>(`${portal}/api/mfa/verify`, { code }),

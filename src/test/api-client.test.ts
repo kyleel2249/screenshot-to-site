@@ -44,6 +44,45 @@ describe("api client against the real handler", () => {
     const api = createClient({ fetchImpl: async () => { throw new Error("offline"); } });
     expect(await api.products()).toMatchObject({ ok: false, status: 0 });
   });
+  test("temporary admin password: nothing works until it is changed; the old password then stops working", async () => {
+    const { api, tokens, p } = await browser();
+    const TEMP = "Temp!Handover1x", NEW = "Brand-New#Passw0rd9", E = "owner@shop.test";
+    expect((await api.admin(PORTAL).enrol({ reference: "ref", email: E, password: TEMP, temporaryPassword: true })).ok).toBe(true);
+    await api.verifyEmail(tokens.at(-1)!);
+    expect((await api.login(E, TEMP)).ok).toBe(true);
+    const admin = api.admin(PORTAL);
+    // signed in, but locked to the change-password step: no roles are shown and even two-step setup and the product list are refused
+    expect((await admin.me()).data).toMatchObject({ mustChangePassword: true, roles: [] });
+    expect((await admin.mfaSetup()).status).toBe(403);
+    expect((await admin.products()).status).toBe(403);
+    // wrong current password, weak new password, and "change" to the same value are all refused, and nothing changes
+    expect((await admin.changePassword({ currentPassword: "Wrong!Passw0rd12", newPassword: NEW })).errors).toEqual(["Your current password isn't right."]);
+    expect((await admin.changePassword({ currentPassword: TEMP, newPassword: "short" })).ok).toBe(false);
+    expect((await admin.changePassword({ currentPassword: TEMP, newPassword: TEMP })).errors).toContain("Choose a password different from your current one.");
+    expect((await admin.me()).data?.mustChangePassword).toBe(true);
+    // a second sign-in elsewhere exists before the change; it must be signed out by the change
+    await api.login(E, TEMP);
+    expect(await transact(p, (db) => [...db.sessions.values()].filter((x) => !x.revoked).length)).toBe(2);
+    expect((await admin.changePassword({ currentPassword: TEMP, newPassword: NEW })).ok).toBe(true);
+    expect(await transact(p, (db) => [...db.sessions.values()].filter((x) => !x.revoked).length)).toBe(1);
+    expect((await admin.me()).data).toMatchObject({ mustChangePassword: false, mfa: "setup_required" });
+    // the temporary password is dead; the new one works and the normal two-step flow follows
+    await api.logout();
+    expect((await api.login(E, TEMP)).ok).toBe(false);
+    expect((await signInStaff(api, PORTAL, E, NEW)).ok).toBe(true);
+    expect((await admin.products()).ok).toBe(true);
+    // the audit log records the change without any password material
+    const log = await transact(p, (db) => JSON.stringify(db.audit));
+    expect(log).toContain("password.changed"); expect(log).not.toContain(TEMP); expect(log).not.toContain(NEW);
+  });
+  test("a normal (non-temporary) owner is not forced to change password, and cannot change it before the second factor is proven", async () => {
+    const { api, tokens } = await browser();
+    await api.admin(PORTAL).enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await api.verifyEmail(tokens.at(-1)!);
+    expect((await api.login("owner@shop.test", PW)).ok).toBe(true);
+    const admin = api.admin(PORTAL);
+    expect((await admin.me()).data).toMatchObject({ mustChangePassword: false, mfa: "setup_required" });
+    expect((await admin.changePassword({ currentPassword: PW, newPassword: "An0ther!Passw0rd" })).status).toBe(403);
+  });
   test("full admin → storefront → checkout round trip through the client", async () => {
     const { api, tokens } = await browser();
     // owner enrolment + login (portal path is typed by the owner; it is not in any bundle)
