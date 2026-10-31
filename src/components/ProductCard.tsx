@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Stars } from "@/components/Reviews";
 import { WishlistButton } from "@/components/WishlistButton";
 import { toast } from "sonner";
@@ -8,7 +8,15 @@ import { useCart } from "@/lib/cart";
 import { useCurrency } from "@/lib/currency";
 import { AVAILABILITY_LABEL, PROMO_LABEL } from "@/lib/domain/status";
 
-/** Soft brand stage when a product image fails to load. */
+/** Prefer API image; fall back to static /products/<SKU>.png shipped with the app. */
+function resolveImage(p: StoreProduct): string {
+  const raw = (p.image || "").trim();
+  if (raw && raw !== "/") return raw;
+  const sku = p.variantId.includes("::") ? p.variantId.split("::")[1] : "";
+  if (sku) return `/products/${sku}.png`;
+  return "";
+}
+
 const FALLBACK =
   "data:image/svg+xml," +
   encodeURIComponent(
@@ -17,15 +25,20 @@ const FALLBACK =
         <stop offset="0%" stop-color="#F4F6FA"/><stop offset="100%" stop-color="#DCE2EC"/>
       </linearGradient></defs>
       <rect width="816" height="816" fill="url(#g)"/>
-      <circle cx="408" cy="360" r="120" fill="#071D49" opacity="0.08"/>
-      <rect x="288" y="500" width="240" height="16" rx="8" fill="#071D49" opacity="0.12"/>
+      <circle cx="408" cy="380" r="110" fill="#071D49" opacity="0.1"/>
+      <rect x="268" y="520" width="280" height="18" rx="9" fill="#071D49" opacity="0.12"/>
     </svg>`,
   );
 
 export function ProductCard({ p }: { p: StoreProduct }) {
   const { add } = useCart();
   const { mode, rate } = useCurrency();
-  const [src, setSrc] = useState(p.image || FALLBACK);
+  const resolved = resolveImage(p);
+  const [src, setSrc] = useState(resolved || FALLBACK);
+  useEffect(() => {
+    setSrc(resolved || FALLBACK);
+  }, [resolved]);
+
   const view = p;
   const price = displayPrice(p, mode, rate);
   const purchasable = isPurchasable(p);
@@ -44,9 +57,8 @@ export function ProductCard({ p }: { p: StoreProduct }) {
       <Link
         to="/product/$slug"
         params={{ slug: p.slug }}
-        className="product-card-3d-stage relative block aspect-square w-full overflow-hidden"
+        className="product-card-3d-stage relative block aspect-square w-full min-h-[140px] overflow-hidden"
       >
-        {/* Depth plate behind the product */}
         <span className="product-card-3d-plate" aria-hidden="true" />
         <img
           src={src}
@@ -56,10 +68,11 @@ export function ProductCard({ p }: { p: StoreProduct }) {
           width={816}
           height={816}
           sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
-          className="product-card-3d-img relative z-[1] h-full w-full max-w-full object-contain p-3 sm:p-4 md:p-5"
-          onError={() => setSrc(FALLBACK)}
+          className="product-card-3d-img relative z-[1] mx-auto block h-full w-full max-h-full max-w-full object-contain p-3 sm:p-4"
+          onError={() => {
+            if (src !== FALLBACK) setSrc(FALLBACK);
+          }}
         />
-        <span className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-1/3 bg-gradient-to-t from-black/10 to-transparent" aria-hidden="true" />
         <span className="absolute left-2 top-2 z-[3] flex flex-wrap gap-1.5 sm:left-3 sm:top-3">
           {view.availability !== "available" && (
             <span className="badge-preorder">{AVAILABILITY_LABEL[view.availability]}</span>
