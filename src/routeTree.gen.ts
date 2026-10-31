@@ -10,10 +10,36 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+<<<<<<< HEAD
+import { Route as PortalRouteImport } from './routes/$portal'
+import { Route as AboutRouteImport } from './routes/about'
+import { Route as AcceptInviteRouteImport } from './routes/accept-invite'
+import { Route as AccountRouteImport } from './routes/account'
+import { Route as BestSellersRouteImport } from './routes/best-sellers'
+import { Route as CartRouteImport } from './routes/cart'
+import { Route as CheckoutRouteImport } from './routes/checkout'
+import { Route as ContactRouteImport } from './routes/contact'
+import { Route as DealsRouteImport } from './routes/deals'
+import { Route as FaqRouteImport } from './routes/faq'
+import { Route as FeaturedRouteImport } from './routes/featured'
+import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as NewArrivalsRouteImport } from './routes/new-arrivals'
+import { Route as PreordersRouteImport } from './routes/preorders'
+import { Route as QuoteStatusRouteImport } from './routes/quote-status'
+import { Route as RegisterRouteImport } from './routes/register'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as ShopRouteImport } from './routes/shop'
+import { Route as TrackRouteImport } from './routes/track'
+import { Route as VerifyEmailRouteImport } from './routes/verify-email'
+import { Route as WholesaleRouteImport } from './routes/wholesale'
+import { Route as PoliciesSlugRouteImport } from './routes/policies.$slug'
+=======
 import { Route as CartRouteImport } from './routes/cart'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as ShopRouteImport } from './routes/shop'
 import { Route as WholesaleRouteImport } from './routes/wholesale'
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
 import { Route as ProductSlugRouteImport } from './routes/product.$slug'
 
 const IndexRoute = IndexRouteImport.update({
@@ -21,26 +47,136 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+<<<<<<< HEAD
+const PortalRoute = PortalRouteImport.update({
+  id: '/$portal',
+  path: '/$portal',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AboutRoute = AboutRouteImport.update({
+  id: '/about',
+  path: '/about',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AcceptInviteRoute = AcceptInviteRouteImport.update({
+  id: '/accept-invite',
+  path: '/accept-invite',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountRoute = AccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BestSellersRoute = BestSellersRouteImport.update({
+  id: '/best-sellers',
+  path: '/best-sellers',
+  getParentRoute: () => rootRouteImport,
+} as any)
+=======
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
 const CartRoute = CartRouteImport.update({
   id: '/cart',
   path: '/cart',
   getParentRoute: () => rootRouteImport,
 } as any)
+<<<<<<< HEAD
+const CheckoutRoute = CheckoutRouteImport.update({
+  id: '/checkout',
+  path: '/checkout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+=======
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
 const ContactRoute = ContactRouteImport.update({
   id: '/contact',
   path: '/contact',
   getParentRoute: () => rootRouteImport,
 } as any)
+<<<<<<< HEAD
+const DealsRoute = DealsRouteImport.update({
+  id: '/deals',
+  path: '/deals',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FaqRoute = FaqRouteImport.update({
+  id: '/faq',
+  path: '/faq',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FeaturedRoute = FeaturedRouteImport.update({
+  id: '/featured',
+  path: '/featured',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
+  id: '/forgot-password',
+  path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const NewArrivalsRoute = NewArrivalsRouteImport.update({
+  id: '/new-arrivals',
+  path: '/new-arrivals',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PreordersRoute = PreordersRouteImport.update({
+  id: '/preorders',
+  path: '/preorders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const QuoteStatusRoute = QuoteStatusRouteImport.update({
+  id: '/quote-status',
+  path: '/quote-status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RegisterRoute = RegisterRouteImport.update({
+  id: '/register',
+  path: '/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+=======
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
 const ShopRoute = ShopRouteImport.update({
   id: '/shop',
   path: '/shop',
   getParentRoute: () => rootRouteImport,
 } as any)
+<<<<<<< HEAD
+const TrackRoute = TrackRouteImport.update({
+  id: '/track',
+  path: '/track',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VerifyEmailRoute = VerifyEmailRouteImport.update({
+  id: '/verify-email',
+  path: '/verify-email',
+  getParentRoute: () => rootRouteImport,
+} as any)
+=======
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
 const WholesaleRoute = WholesaleRouteImport.update({
   id: '/wholesale',
   path: '/wholesale',
   getParentRoute: () => rootRouteImport,
 } as any)
+<<<<<<< HEAD
+const PoliciesSlugRoute = PoliciesSlugRouteImport.update({
+  id: '/policies/$slug',
+  path: '/policies/$slug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+=======
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
 const ProductSlugRoute = ProductSlugRouteImport.update({
   id: '/product/$slug',
   path: '/product/$slug',
@@ -49,32 +185,190 @@ const ProductSlugRoute = ProductSlugRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+<<<<<<< HEAD
+  '/$portal': typeof PortalRoute
+  '/about': typeof AboutRoute
+  '/accept-invite': typeof AcceptInviteRoute
+  '/account': typeof AccountRoute
+  '/best-sellers': typeof BestSellersRoute
+  '/cart': typeof CartRoute
+  '/checkout': typeof CheckoutRoute
+  '/contact': typeof ContactRoute
+  '/deals': typeof DealsRoute
+  '/faq': typeof FaqRoute
+  '/featured': typeof FeaturedRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/login': typeof LoginRoute
+  '/new-arrivals': typeof NewArrivalsRoute
+  '/preorders': typeof PreordersRoute
+  '/quote-status': typeof QuoteStatusRoute
+  '/register': typeof RegisterRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/shop': typeof ShopRoute
+  '/track': typeof TrackRoute
+  '/verify-email': typeof VerifyEmailRoute
+  '/wholesale': typeof WholesaleRoute
+  '/policies/$slug': typeof PoliciesSlugRoute
+=======
   '/cart': typeof CartRoute
   '/contact': typeof ContactRoute
   '/shop': typeof ShopRoute
   '/wholesale': typeof WholesaleRoute
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
   '/product/$slug': typeof ProductSlugRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+<<<<<<< HEAD
+  '/$portal': typeof PortalRoute
+  '/about': typeof AboutRoute
+  '/accept-invite': typeof AcceptInviteRoute
+  '/account': typeof AccountRoute
+  '/best-sellers': typeof BestSellersRoute
+  '/cart': typeof CartRoute
+  '/checkout': typeof CheckoutRoute
+  '/contact': typeof ContactRoute
+  '/deals': typeof DealsRoute
+  '/faq': typeof FaqRoute
+  '/featured': typeof FeaturedRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/login': typeof LoginRoute
+  '/new-arrivals': typeof NewArrivalsRoute
+  '/preorders': typeof PreordersRoute
+  '/quote-status': typeof QuoteStatusRoute
+  '/register': typeof RegisterRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/shop': typeof ShopRoute
+  '/track': typeof TrackRoute
+  '/verify-email': typeof VerifyEmailRoute
+  '/wholesale': typeof WholesaleRoute
+  '/policies/$slug': typeof PoliciesSlugRoute
+=======
   '/cart': typeof CartRoute
   '/contact': typeof ContactRoute
   '/shop': typeof ShopRoute
   '/wholesale': typeof WholesaleRoute
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
   '/product/$slug': typeof ProductSlugRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+<<<<<<< HEAD
+  '/$portal': typeof PortalRoute
+  '/about': typeof AboutRoute
+  '/accept-invite': typeof AcceptInviteRoute
+  '/account': typeof AccountRoute
+  '/best-sellers': typeof BestSellersRoute
+  '/cart': typeof CartRoute
+  '/checkout': typeof CheckoutRoute
+  '/contact': typeof ContactRoute
+  '/deals': typeof DealsRoute
+  '/faq': typeof FaqRoute
+  '/featured': typeof FeaturedRoute
+  '/forgot-password': typeof ForgotPasswordRoute
+  '/login': typeof LoginRoute
+  '/new-arrivals': typeof NewArrivalsRoute
+  '/preorders': typeof PreordersRoute
+  '/quote-status': typeof QuoteStatusRoute
+  '/register': typeof RegisterRoute
+  '/reset-password': typeof ResetPasswordRoute
+  '/shop': typeof ShopRoute
+  '/track': typeof TrackRoute
+  '/verify-email': typeof VerifyEmailRoute
+  '/wholesale': typeof WholesaleRoute
+  '/policies/$slug': typeof PoliciesSlugRoute
+=======
   '/cart': typeof CartRoute
   '/contact': typeof ContactRoute
   '/shop': typeof ShopRoute
   '/wholesale': typeof WholesaleRoute
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
   '/product/$slug': typeof ProductSlugRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+<<<<<<< HEAD
+    | '/'
+    | '/$portal'
+    | '/about'
+    | '/accept-invite'
+    | '/account'
+    | '/best-sellers'
+    | '/cart'
+    | '/checkout'
+    | '/contact'
+    | '/deals'
+    | '/faq'
+    | '/featured'
+    | '/forgot-password'
+    | '/login'
+    | '/new-arrivals'
+    | '/preorders'
+    | '/quote-status'
+    | '/register'
+    | '/reset-password'
+    | '/shop'
+    | '/track'
+    | '/verify-email'
+    | '/wholesale'
+    | '/policies/$slug'
+    | '/product/$slug'
+  fileRoutesByTo: FileRoutesByTo
+  to:
+    | '/'
+    | '/$portal'
+    | '/about'
+    | '/accept-invite'
+    | '/account'
+    | '/best-sellers'
+    | '/cart'
+    | '/checkout'
+    | '/contact'
+    | '/deals'
+    | '/faq'
+    | '/featured'
+    | '/forgot-password'
+    | '/login'
+    | '/new-arrivals'
+    | '/preorders'
+    | '/quote-status'
+    | '/register'
+    | '/reset-password'
+    | '/shop'
+    | '/track'
+    | '/verify-email'
+    | '/wholesale'
+    | '/policies/$slug'
+    | '/product/$slug'
+  id:
+    | '__root__'
+    | '/'
+    | '/$portal'
+    | '/about'
+    | '/accept-invite'
+    | '/account'
+    | '/best-sellers'
+    | '/cart'
+    | '/checkout'
+    | '/contact'
+    | '/deals'
+    | '/faq'
+    | '/featured'
+    | '/forgot-password'
+    | '/login'
+    | '/new-arrivals'
+    | '/preorders'
+    | '/quote-status'
+    | '/register'
+    | '/reset-password'
+    | '/shop'
+    | '/track'
+    | '/verify-email'
+    | '/wholesale'
+    | '/policies/$slug'
+=======
     '/' | '/cart' | '/contact' | '/shop' | '/wholesale' | '/product/$slug'
   fileRoutesByTo: FileRoutesByTo
   to: '/' | '/cart' | '/contact' | '/shop' | '/wholesale' | '/product/$slug'
@@ -85,15 +379,42 @@ export interface FileRouteTypes {
     | '/contact'
     | '/shop'
     | '/wholesale'
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
     | '/product/$slug'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+<<<<<<< HEAD
+  PortalRoute: typeof PortalRoute
+  AboutRoute: typeof AboutRoute
+  AcceptInviteRoute: typeof AcceptInviteRoute
+  AccountRoute: typeof AccountRoute
+  BestSellersRoute: typeof BestSellersRoute
+  CartRoute: typeof CartRoute
+  CheckoutRoute: typeof CheckoutRoute
+  ContactRoute: typeof ContactRoute
+  DealsRoute: typeof DealsRoute
+  FaqRoute: typeof FaqRoute
+  FeaturedRoute: typeof FeaturedRoute
+  ForgotPasswordRoute: typeof ForgotPasswordRoute
+  LoginRoute: typeof LoginRoute
+  NewArrivalsRoute: typeof NewArrivalsRoute
+  PreordersRoute: typeof PreordersRoute
+  QuoteStatusRoute: typeof QuoteStatusRoute
+  RegisterRoute: typeof RegisterRoute
+  ResetPasswordRoute: typeof ResetPasswordRoute
+  ShopRoute: typeof ShopRoute
+  TrackRoute: typeof TrackRoute
+  VerifyEmailRoute: typeof VerifyEmailRoute
+  WholesaleRoute: typeof WholesaleRoute
+  PoliciesSlugRoute: typeof PoliciesSlugRoute
+=======
   CartRoute: typeof CartRoute
   ContactRoute: typeof ContactRoute
   ShopRoute: typeof ShopRoute
   WholesaleRoute: typeof WholesaleRoute
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
   ProductSlugRoute: typeof ProductSlugRoute
 }
 
@@ -106,6 +427,44 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+<<<<<<< HEAD
+    '/$portal': {
+      id: '/$portal'
+      path: '/$portal'
+      fullPath: '/$portal'
+      preLoaderRoute: typeof PortalRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/about': {
+      id: '/about'
+      path: '/about'
+      fullPath: '/about'
+      preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/accept-invite': {
+      id: '/accept-invite'
+      path: '/accept-invite'
+      fullPath: '/accept-invite'
+      preLoaderRoute: typeof AcceptInviteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/account': {
+      id: '/account'
+      path: '/account'
+      fullPath: '/account'
+      preLoaderRoute: typeof AccountRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/best-sellers': {
+      id: '/best-sellers'
+      path: '/best-sellers'
+      fullPath: '/best-sellers'
+      preLoaderRoute: typeof BestSellersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+=======
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
     '/cart': {
       id: '/cart'
       path: '/cart'
@@ -113,6 +472,16 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CartRouteImport
       parentRoute: typeof rootRouteImport
     }
+<<<<<<< HEAD
+    '/checkout': {
+      id: '/checkout'
+      path: '/checkout'
+      fullPath: '/checkout'
+      preLoaderRoute: typeof CheckoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+=======
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
     '/contact': {
       id: '/contact'
       path: '/contact'
@@ -120,6 +489,79 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ContactRouteImport
       parentRoute: typeof rootRouteImport
     }
+<<<<<<< HEAD
+    '/deals': {
+      id: '/deals'
+      path: '/deals'
+      fullPath: '/deals'
+      preLoaderRoute: typeof DealsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/faq': {
+      id: '/faq'
+      path: '/faq'
+      fullPath: '/faq'
+      preLoaderRoute: typeof FaqRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/featured': {
+      id: '/featured'
+      path: '/featured'
+      fullPath: '/featured'
+      preLoaderRoute: typeof FeaturedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forgot-password': {
+      id: '/forgot-password'
+      path: '/forgot-password'
+      fullPath: '/forgot-password'
+      preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/new-arrivals': {
+      id: '/new-arrivals'
+      path: '/new-arrivals'
+      fullPath: '/new-arrivals'
+      preLoaderRoute: typeof NewArrivalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/preorders': {
+      id: '/preorders'
+      path: '/preorders'
+      fullPath: '/preorders'
+      preLoaderRoute: typeof PreordersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/quote-status': {
+      id: '/quote-status'
+      path: '/quote-status'
+      fullPath: '/quote-status'
+      preLoaderRoute: typeof QuoteStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/register': {
+      id: '/register'
+      path: '/register'
+      fullPath: '/register'
+      preLoaderRoute: typeof RegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+=======
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
     '/shop': {
       id: '/shop'
       path: '/shop'
@@ -127,6 +569,23 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShopRouteImport
       parentRoute: typeof rootRouteImport
     }
+<<<<<<< HEAD
+    '/track': {
+      id: '/track'
+      path: '/track'
+      fullPath: '/track'
+      preLoaderRoute: typeof TrackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/verify-email': {
+      id: '/verify-email'
+      path: '/verify-email'
+      fullPath: '/verify-email'
+      preLoaderRoute: typeof VerifyEmailRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+=======
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
     '/wholesale': {
       id: '/wholesale'
       path: '/wholesale'
@@ -134,6 +593,16 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WholesaleRouteImport
       parentRoute: typeof rootRouteImport
     }
+<<<<<<< HEAD
+    '/policies/$slug': {
+      id: '/policies/$slug'
+      path: '/policies/$slug'
+      fullPath: '/policies/$slug'
+      preLoaderRoute: typeof PoliciesSlugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+=======
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
     '/product/$slug': {
       id: '/product/$slug'
       path: '/product/$slug'
@@ -146,10 +615,36 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+<<<<<<< HEAD
+  PortalRoute: PortalRoute,
+  AboutRoute: AboutRoute,
+  AcceptInviteRoute: AcceptInviteRoute,
+  AccountRoute: AccountRoute,
+  BestSellersRoute: BestSellersRoute,
+  CartRoute: CartRoute,
+  CheckoutRoute: CheckoutRoute,
+  ContactRoute: ContactRoute,
+  DealsRoute: DealsRoute,
+  FaqRoute: FaqRoute,
+  FeaturedRoute: FeaturedRoute,
+  ForgotPasswordRoute: ForgotPasswordRoute,
+  LoginRoute: LoginRoute,
+  NewArrivalsRoute: NewArrivalsRoute,
+  PreordersRoute: PreordersRoute,
+  QuoteStatusRoute: QuoteStatusRoute,
+  RegisterRoute: RegisterRoute,
+  ResetPasswordRoute: ResetPasswordRoute,
+  ShopRoute: ShopRoute,
+  TrackRoute: TrackRoute,
+  VerifyEmailRoute: VerifyEmailRoute,
+  WholesaleRoute: WholesaleRoute,
+  PoliciesSlugRoute: PoliciesSlugRoute,
+=======
   CartRoute: CartRoute,
   ContactRoute: ContactRoute,
   ShopRoute: ShopRoute,
   WholesaleRoute: WholesaleRoute,
+>>>>>>> 91649556c441a526170e5e021fd26bf0cbf287f1
   ProductSlugRoute: ProductSlugRoute,
 }
 export const routeTree = rootRouteImport

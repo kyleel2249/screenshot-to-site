@@ -26,6 +26,21 @@ describe("storefront helpers", () => {
     expect(sortProducts(list, undefined)[0]!.slug).toBe("tote");
     expect(cheapestGhs(p({ slug: "u", price: { USD: 1 } }))).toBe(Number.MAX_SAFE_INTEGER);
   });
+  it("search also matches description and category names, and every typed word must match", () => {
+    const cat = categories.find((c) => c.id === "cat-phones-and-accessories--power-banks")!;
+    const parent = categories.find((c) => c.id === cat.parentId)!;
+    const items = [
+      p({ slug: "duffel", shortDescription: "Waterproof travel duffel" }),
+      p({ slug: "pack", shortDescription: "Everyday backpack", categoryId: "cat-bags-and-luggage" }),
+    ];
+    expect(search(items, "waterproof").map((x) => x.slug)).toEqual(["duffel"]);
+    expect(search(items, "travel waterproof").map((x) => x.slug)).toEqual(["duffel"]);
+    expect(search(items, "waterproof backpack")).toEqual([]);
+    expect(search(items, "   ").length).toBe(2);
+    expect(search(items, cat.name, categories).map((x) => x.slug)).toEqual(["duffel"]);
+    expect(search(items, parent.name, categories).map((x) => x.slug)).toEqual(["duffel"]);
+    expect(search(items, cat.name).length).toBe(0); // category names only searched when the tree is supplied
+  });
   it("shows both independently set prices in dual mode and never converts without a rate", () => {
     expect(displayPrice(list[0]!, "DUAL").current.map((c) => c.text)).toEqual(["GH₵ 980.00", "US$ 63.00"]);
     const w = displayPrice(list[1]!, "GHS"); expect(w.current[0]!.text).toBe("GH₵ 1,500.00"); expect(w.original[0]!.text).toBe("GH₵ 1,650.00");
