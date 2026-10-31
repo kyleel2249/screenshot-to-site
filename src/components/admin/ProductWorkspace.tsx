@@ -34,6 +34,26 @@ const empty: ProductFormState = {
   availability: "available",
 };
 
+function readFileAsDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Could not read image file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function isPersistableImageUrl(url: string): boolean {
+  if (!url || url.startsWith("blob:")) return false;
+  return (
+    url.startsWith("/media/") ||
+    url.startsWith("/products/") ||
+    url.startsWith("data:image/") ||
+    url.startsWith("https://") ||
+    url.startsWith("http://")
+  );
+}
+
 export function ProductWorkspace({
   categories,
   existingSkus,
@@ -58,6 +78,9 @@ export function ProductWorkspace({
   const [uploadNote, setUploadNote] = useState("");
   const [saving, setSaving] = useState(false);
   const objectUrlRef = useRef<string | null>(null);
+  /** Always the latest non-blob image URL for save (avoids stale React state). */
+  const imageUrlRef = useRef<string>(empty.image);
+  const pendingUploadRef = useRef<Promise<string> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const groups = useMemo(() => {
@@ -127,6 +150,15 @@ export function ProductWorkspace({
     }));
   }
 
+  function applyImageUrl(url: string) {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+    imageUrlRef.current = url;
+    setForm((f) => ({ ...f, image: url }));
+  }
+
   async function handleFile(file: File | undefined) {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
@@ -134,7 +166,8 @@ export function ProductWorkspace({
       return;
     }
     setLocalErrors([]);
-    setUploadNote("");
+    setUploadNote("Uploading…");
+
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     const localUrl = URL.createObjectURL(file);
     objectUrlRef.current = localUrl;
@@ -143,28 +176,43 @@ export function ProductWorkspace({
       image: localUrl,
       imageAlt: f.imageAlt.trim() || suggestImageAlt(f.name || file.name.replace(/\.[^.]+$/, ""), categoryName),
     }));
-    if (!onUploadImage) {
-      setUploadNote("Preview only — server upload not wired.");
-      return;
-    }
+
+    const job = (async (): Promise<string> => {
+      if (onUploadImage) {
+        try {
+          const result = await onUploadImage(file);
+          if (result.ok && result.url && isPersistableImageUrl(result.url)) {
+            return result.url;
+          }
+        } catch {
+          /* fall through to data URL */
+        }
+      }
+      try {
+        const dataUrl = await readFileAsDataUrl(file);
+        if (dataUrl.startsWith("data:image/")) return dataUrl;
+      } catch {
+        /* ignore */
+      }
+      return "/products/placeholder.png";
+    })();
+
+    pendingUploadRef.current = job;
     setUploading(true);
     try {
-      const result = await onUploadImage(file);
-      if (result.ok) {
-        if (objectUrlRef.current) {
-          URL.revokeObjectURL(objectUrlRef.current);
-          objectUrlRef.current = null;
-        }
-        setForm((f) => ({ ...f, image: result.url }));
-        setUploadNote("Image uploaded and linked.");
-      } else {
-        setUploadNote(result.error);
-        setLocalErrors([result.error]);
-      }
-    } catch {
-      setUploadNote("Upload failed. You can still save with a placeholder image.");
+      const url = await job;
+      applyImageUrl(url);
+      setUploadNote(
+        url.startsWith("/media/")
+          ? "Image uploaded and ready to save."
+          : url.startsWith("data:image/")
+            ? "Image ready (embedded). You can save the product."
+            : "Using placeholder image — try upload again if needed.",
+      );
+    } finally {
+      if (pendingUploadRef.current === job) pendingUploadRef.current = null;
+      setUploading(false);
     }
-    setUploading(false);
   }
 
   async function submitForm() {
@@ -177,15 +225,30 @@ export function ProductWorkspace({
       return;
     }
     setLocalErrors([]);
-    const ghsRaw = form.priceGhsMajor.trim() ? Math.round(parseFloat(form.priceGhsMajor) * 100) : undefined;
-    const usdRaw = form.priceUsdMajor.trim() ? Math.round(parseFloat(form.priceUsdMajor) * 100) : undefined;
-    const ghs = ghsRaw !== undefined && Number.isFinite(ghsRaw) ? ghsRaw : undefined;
-    const usd = usdRaw !== undefined && Number.isFinite(usdRaw) ? usdRaw : undefined;
-    let image = form.image.trim() || "/products/placeholder.png";
-    if (image.startsWith("blob:")) image = "/products/placeholder.png";
 
     setSaving(true);
     try {
+      // Finish any in-flight upload before save — never show “wait for upload” as a hard stop
+      if (pendingUploadRef.current) {
+        setUploadNote("Finishing image…");
+        try {
+          const url = await pendingUploadRef.current;
+          applyImageUrl(url);
+        } catch {
+          /* keep whatever we have */
+        }
+      }
+
+      let image = imageUrlRef.current || form.image.trim() || "/products/placeholder.png";
+      if (!isPersistableImageUrl(image)) {
+        image = "/products/placeholder.png";
+      }
+
+      const ghsRaw = form.priceGhsMajor.trim() ? Math.round(parseFloat(form.priceGhsMajor) * 100) : undefined;
+      const usdRaw = form.priceUsdMajor.trim() ? Math.round(parseFloat(form.priceUsdMajor) * 100) : undefined;
+      const ghs = ghsRaw !== undefined && Number.isFinite(ghsRaw) ? ghsRaw : undefined;
+      const usd = usdRaw !== undefined && Number.isFinite(usdRaw) ? usdRaw : undefined;
+
       await onSave({
         name: form.name.trim(),
         sku: form.sku.trim(),
@@ -199,10 +262,12 @@ export function ProductWorkspace({
         published: form.published,
         availability: form.availability,
       });
+
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
         objectUrlRef.current = null;
       }
+      imageUrlRef.current = empty.image;
       setForm({ ...empty, categoryId: form.categoryId });
       setSkuLocked(false);
       setPriceSource(null);
@@ -213,7 +278,7 @@ export function ProductWorkspace({
     setSaving(false);
   }
 
-  const locked = busy || uploading || saving;
+  const locked = busy || saving;
 
   return (
     <div className="grid gap-8 xl:grid-cols-[1fr_minmax(280px,380px)]">
@@ -221,7 +286,9 @@ export function ProductWorkspace({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className="font-display text-xl font-bold text-primary">Add product</h2>
-            <p className="text-sm text-muted-foreground">Live preview updates as you type. Enter a name and at least one price to publish.</p>
+            <p className="text-sm text-muted-foreground">
+              Upload an image (preview updates instantly), enter a name and price, then Save.
+            </p>
           </div>
           <button type="button" className="rounded-full border border-border px-3 py-1.5 text-xs font-medium hover:bg-gold/15" onClick={regenerateCopy}>
             Regenerate description & alt
@@ -292,7 +359,7 @@ export function ProductWorkspace({
           </div>
           <div className="sm:col-span-2 rounded-xl border border-dashed border-border bg-secondary/40 p-4">
             <p className="text-sm font-medium text-primary">Product image</p>
-            <p className="mt-1 text-xs text-muted-foreground">JPEG, PNG, WebP or GIF · max ~3 MB.</p>
+            <p className="mt-1 text-xs text-muted-foreground">JPEG, PNG, WebP or GIF · max ~3 MB. Save works even if upload is still finishing.</p>
             <div className="mt-3 flex flex-wrap items-center gap-3">
               <input
                 ref={fileRef}
@@ -302,14 +369,23 @@ export function ProductWorkspace({
                 id="ws-image-file"
                 onChange={(e) => void handleFile(e.target.files?.[0])}
               />
-              <button type="button" disabled={locked} className="btn-primary text-sm" onClick={() => fileRef.current?.click()}>
+              <button type="button" disabled={uploading || locked} className="btn-primary text-sm" onClick={() => fileRef.current?.click()}>
                 {uploading ? "Uploading…" : "Upload image"}
               </button>
               <span className="text-xs text-muted-foreground">or paste a URL below</span>
             </div>
             {uploadNote && <p className="mt-2 text-xs text-muted-foreground">{uploadNote}</p>}
           </div>
-          <Field label="Image URL" value={form.image.startsWith("blob:") ? "" : form.image} onChange={(e) => setForm((f) => ({ ...f, image: e.target.value }))} />
+          <Field
+            label="Image URL"
+            value={form.image.startsWith("blob:") ? "" : form.image.startsWith("data:image/") ? "(embedded image ready)" : form.image}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v.startsWith("(embedded")) return;
+              imageUrlRef.current = v;
+              setForm((f) => ({ ...f, image: v }));
+            }}
+          />
           <Field label="Image alt text" value={form.imageAlt} onChange={(e) => setForm((f) => ({ ...f, imageAlt: e.target.value }))} />
           <div>
             <Field label="Price (GHS)" type="number" step="0.01" min="0" value={form.priceGhsMajor} onChange={(e) => onGhs(e.target.value)} />
@@ -318,7 +394,7 @@ export function ProductWorkspace({
             <Field label="Price (USD)" type="number" step="0.01" min="0" value={form.priceUsdMajor} onChange={(e) => onUsd(e.target.value)} />
           </div>
           <p className="sm:col-span-2 text-xs text-muted-foreground">
-            Rate: 1 USD = {ghsPerUsd.toFixed(2)} GHS. Publish needs at least one price (or product is saved as draft).
+            Rate: 1 USD = {ghsPerUsd.toFixed(2)} GHS. Publish needs at least one price (otherwise saved as draft).
           </p>
           <Field label="Stock" type="number" min="0" value={form.onHand} onChange={(e) => setForm((f) => ({ ...f, onHand: e.target.value }))} />
           <div>
@@ -349,6 +425,8 @@ export function ProductWorkspace({
                   URL.revokeObjectURL(objectUrlRef.current);
                   objectUrlRef.current = null;
                 }
+                imageUrlRef.current = empty.image;
+                pendingUploadRef.current = null;
                 setForm({ ...empty, categoryId: form.categoryId });
                 setSkuLocked(false);
                 setPriceSource(null);
