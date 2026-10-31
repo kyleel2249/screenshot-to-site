@@ -1,25 +1,36 @@
 # Temporary open admin access
 
-**Status: ON** for development.
+**Status: ON** (`STAFF_OPEN_ACCESS = true` in `src/lib/security/open-access.ts`).
 
-While `STAFF_OPEN_ACCESS = true` in `src/server/services/auth.ts`:
+## Portal URL
 
-- Staff / owner can sign in with **email only** (password may be blank or anything).
-- **Email verification** is not required for staff.
-- **MFA / authenticator** is not required.
-- Step-up re-auth and forced password change are skipped for staff.
-- Customer accounts are **unchanged** (still need password).
+While open access is on and `ADMIN_PORTAL_PATH` is unset, the owner console is at:
 
-## How to sign in
-1. Enrol the owner once (portal enrol) if you have not already.
-2. Open the site login / portal login.
-3. Enter the **owner email** and any password (or leave blank if the form allows).
-4. You should reach the dashboard without email links or MFA codes.
+**`/dera-owner-console`**
 
-## How to lock down for production
-1. Set `STAFF_OPEN_ACCESS = false` in `src/server/services/auth.ts`.
-2. Redeploy.
-3. Ensure every staff user has a strong password, verified email, and MFA set up.
-4. Rotate `SESSION_SECRET` if this mode was ever enabled on a public URL.
+Example: `https://your-site.example/dera-owner-console`
 
-**Do not leave open access enabled on a public production site.** Anyone who knows a staff email can take over the admin.
+## First-time enrolment
+
+1. Open the portal URL above.
+2. Enrol with:
+   - **Email** — your owner email
+   - **Reference** — any text (ignored while open access is on)
+   - **Password** — optional; blank is allowed
+3. Sign in with that email (password optional).
+4. No email verification or MFA is required.
+
+You do **not** need `ADMIN_BOOTSTRAP_REF_HASH`, `SESSION_SECRET`, or D1 for this temporary mode. Without D1 the shop uses **in-memory** storage (data resets when the Worker restarts). For lasting data, create D1 + secrets as in `docs/DEPLOYMENT.md`.
+
+## If you still see errors
+
+| Message | Meaning |
+|--------|--------|
+| Enrolment unavailable / details rejected | An owner may already exist, or setup was closed. Clear the D1 `app_state` (or wait for a memory reset) and try once. |
+| Service not configured | Old deploy without open-access server fallback — pull latest `main` and redeploy. |
+
+## Lock down for production
+
+1. Set `STAFF_OPEN_ACCESS = false` in `src/lib/security/open-access.ts`.
+2. Configure D1, `SESSION_SECRET`, `SITE_ORIGIN`, `ADMIN_BOOTSTRAP_REF_HASH`, `ADMIN_PORTAL_PATH`.
+3. Redeploy and complete real enrolment with MFA.
