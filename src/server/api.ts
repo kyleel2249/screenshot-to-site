@@ -7,6 +7,7 @@
  *  - payment webhooks are accepted only with a valid HMAC signature over the raw body
  */
 import { labelOf } from "../lib/order-labels";
+import { overview } from "./services/overview";
 import { importProducts } from "./services/import";
 import { cleanBusiness } from "../lib/business";
 import { sellableQty, effectiveAvailability, activePromoLabels } from "../lib/domain/status";
@@ -250,6 +251,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         if (sub === "/purchase-orders" && req.method === "POST") { const po = await transact(p, (db) => createPurchaseOrder(db, actor, body)); return json({ id: po.id, ref: po.ref }, 201); }
         if (sub === "/purchase-orders/status" && req.method === "POST") { await transact(p, (db) => setPurchaseOrderStatus(db, actor, str(body, "id"), body["to"])); return json({ ok: true }); }
         if (sub === "/purchase-orders/receive" && req.method === "POST") { await transact(p, (db) => receivePurchaseOrder(db, actor, str(body, "id"), body["lines"])); return json({ ok: true }); }
+        if (sub === "/overview" && req.method === "GET") return json(await transact(p, (db) => overview(db, actor)));
         if (sub === "/business" && req.method === "GET") { requirePermission(actor, "settings.write"); return json(await transact(p, (db) => db.business)); }
         if (sub === "/business" && req.method === "POST") {
           requirePermission(actor, "settings.write");

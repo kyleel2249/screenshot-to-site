@@ -4,7 +4,7 @@ import { attributesFor } from "@/lib/domain/attributes";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import { PAY_METHOD_LABELS, type AdminDiscount, type AdminOrder, type AdminProduct, type AdminZone, type AdminQuote, type AdminReview, type Analytics, type PreorderQueueItem, type PurchaseOrder, type StaffMember, type Supplier, type Ticket } from "@/lib/api-client";
+import { PAY_METHOD_LABELS, type AdminDiscount, type AdminOrder, type AdminProduct, type AdminZone, type AdminQuote, type AdminReview, type Analytics, type Overview, type PreorderQueueItem, type PurchaseOrder, type StaffMember, type Supplier, type Ticket } from "@/lib/api-client";
 import { childrenOf, topLevel, type CategoryNode, type FilterProfile } from "@/lib/domain/categories";
 import type { Section } from "@/lib/content";
 import { formatMoney } from "@/lib/domain/money";
@@ -24,7 +24,7 @@ export const Route = createFileRoute("/$portal")({
   component: Dashboard,
 });
 
-type Tab = "business" | "purchasing" | "reviews" | "content" | "quotes" | "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
+type Tab = "overview" | "business" | "purchasing" | "reviews" | "content" | "quotes" | "staff" | "products" | "orders" | "support" | "analytics" | "categories" | "shipping" | "discounts" | "audit";
 const AVAIL = Object.keys(AVAILABILITY_LABEL) as Availability[];
 
 function Dashboard() {
@@ -32,7 +32,7 @@ function Dashboard() {
   const admin = useMemo(() => api.admin(`/${portal}`), [portal]);
   const [state, setState] = useState<"checking" | "enrol" | "login" | "mfa-setup" | "mfa-code" | "in" | "missing">("checking");
   const [roles, setRoles] = useState<string[]>([]);
-  const [tab, setTab] = useState<Tab>("products");
+  const [tab, setTab] = useState<Tab>("overview");
 
   const check = useCallback(async () => { const r = await admin.me(); if (r.ok && r.data) { setRoles(r.data.roles); setState(r.data.mfa === "verified" ? "in" : r.data.mfa === "setup_required" ? "mfa-setup" : "mfa-code"); } else setState(r.status === 401 || r.status === 404 ? "login" : "missing"); }, [admin]);
   useEffect(() => { void check(); }, [check]);
@@ -50,9 +50,9 @@ function Dashboard() {
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => setState("login"))}>Sign out</button>
       </header>
       <nav className="mt-6 flex gap-2" aria-label="Sections" role="tablist">
-        {(["products", "orders", "purchasing", "business", "reviews", "content", "quotes", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
+        {(["overview", "products", "orders", "purchasing", "business", "reviews", "content", "quotes", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
       </nav>
-      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "business" ? <BusinessTab admin={admin} /> : tab === "purchasing" ? <Purchasing admin={admin} /> : tab === "reviews" ? <ReviewsTab admin={admin} /> : tab === "content" ? <ContentTab admin={admin} /> : tab === "quotes" ? <Quotes admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
+      <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "overview" ? <OverviewTab admin={admin} go={setTab} /> : tab === "business" ? <BusinessTab admin={admin} /> : tab === "purchasing" ? <Purchasing admin={admin} /> : tab === "reviews" ? <ReviewsTab admin={admin} /> : tab === "content" ? <ContentTab admin={admin} /> : tab === "quotes" ? <Quotes admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
     </div>
   );
 }
@@ -671,5 +671,44 @@ function ImportProducts({ admin, onDone }: { admin: Admin; onDone: () => Promise
         </div>
       </div>
     </details>
+  );
+}
+
+function OverviewTab({ admin, go }: { admin: Admin; go: (t: Tab) => void }) {
+  const { data, errors } = useLoad<Overview>(useCallback(() => admin.overview(), [admin]));
+  const card = (label: string, n: number, tab: Tab, urgent = false) => (
+    <button key={label} onClick={() => go(tab)} className={`rounded-lg border p-4 text-left hover:bg-secondary ${urgent && n > 0 ? "border-primary" : "border-border"}`}>
+      <p className="text-3xl font-bold">{n}</p><p className="text-sm text-muted-foreground">{label}</p>
+    </button>);
+  const o = data?.orders, st = data?.stock;
+  return (
+    <div className="space-y-8">
+      <Errors errors={errors} />
+      {o && (<section aria-labelledby="ov-orders"><h2 id="ov-orders" className="mb-3 text-lg font-semibold">Orders needing attention</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {card("Paid, ready to fulfil", o.toFulfil, "orders", true)}{card("Bank transfers to confirm", o.bankTransfersToConfirm, "orders", true)}
+          {card("Payments under review", o.paymentsUnderReview, "orders", true)}{card("Cancellation requests", o.cancellationRequests, "orders", true)}
+          {card("Refunds pending", o.refundsPending, "orders", true)}{card("Pre-orders waiting for stock", o.preordersWaiting, "purchasing")}
+          {card("Awaiting customer payment", o.awaitingPayment, "orders")}{card("New wholesale quotes", o.newQuotes, "quotes", true)}
+        </div></section>)}
+      {st && (<section aria-labelledby="ov-stock"><h2 id="ov-stock" className="mb-3 text-lg font-semibold">Stock</h2>
+        <div className="grid gap-3 sm:grid-cols-3">{card("Out of stock (published)", st.outOfStock, "products", true)}{card("Units on order from suppliers", st.incomingUnits, "purchasing")}</div>
+        {st.low.length > 0 && <div className="mt-3"><p className="text-sm font-medium">Running low (≤ {st.threshold} available)</p>
+          <ul className="mt-1 text-sm text-muted-foreground">{st.low.map((l) => <li key={l.variantId}>{l.name} — {l.available} left</li>)}</ul></div>}
+      </section>)}
+      {(data?.reviewsToModerate !== undefined || data?.openTickets !== undefined) && (
+        <section aria-labelledby="ov-inbox"><h2 id="ov-inbox" className="mb-3 text-lg font-semibold">Inbox</h2>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {data?.reviewsToModerate !== undefined && card("Reviews to moderate", data.reviewsToModerate, "reviews", true)}
+            {data?.openTickets !== undefined && card("Open support messages", data.openTickets, "support", true)}
+          </div></section>)}
+      {data?.sales && (<section aria-labelledby="ov-sales"><h2 id="ov-sales" className="mb-3 text-lg font-semibold">Sales (paid orders, after refunds)</h2>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {([["Last 7 days", data.sales.last7Days], ["Last 30 days", data.sales.last30Days]] as const).map(([label, by]) => (
+            <div key={label} className="rounded-lg border border-border p-4"><p className="text-sm text-muted-foreground">{label}</p>
+              {Object.entries(by).length === 0 ? <p className="mt-1 text-sm">No paid orders yet.</p> : Object.entries(by).map(([cur, v]) => <p key={cur} className="mt-1"><span className="text-2xl font-bold">{formatMoney({ amount: v.revenue, currency: cur as "GHS" | "USD" })}</span> <span className="text-sm text-muted-foreground">from {v.orders} order{v.orders === 1 ? "" : "s"}</span></p>)}
+            </div>))}
+        </div></section>)}
+    </div>
   );
 }

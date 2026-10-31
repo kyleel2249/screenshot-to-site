@@ -871,3 +871,28 @@ describe("customer emails across the order lifecycle", () => {
     await admin.confirmBankTransfer(id2, b2.order.total, "OK-1"); expect(sink).toEqual([{ to: "g@x.com", t: "payment_received", ref: b2.order.ref }]);
   });
 });
+
+describe("dashboard overview", () => {
+  test("counts what needs attention; each role only sees sections it may open; sales net of refunds; low stock sorted", async () => {
+    const { mk, order, admin, call, p } = await shop(fake2({}), { BANK_TRANSFER_DETAILS: "Bank X" });
+    const base = (await admin.overview()).data!;
+    expect(base.orders).toMatchObject({ toFulfil: 0, awaitingPayment: 0, bankTransfersToConfirm: 0 }); expect(base.sales).toEqual({ last7Days: {}, last30Days: {} });
+    // one paid order (fulfil), one awaiting payment, one bank transfer to confirm
+    const paid = await order(mk()); await call("/api/webhooks/fakepay", { method: "POST", body: JSON.stringify({ eventId: "ov1", orderRef: paid.order.ref, amount: paid.order.total, currency: "GHS", status: "success" }) }, { "x-sig": "good" });
+    await order(mk()); const cb = mk(); const bo = await order(cb); await cb.startBankTransfer(bo.order.ref, bo.trackingSecret);
+    const o = (await admin.overview()).data!;
+    expect(o.orders).toMatchObject({ toFulfil: 1, awaitingPayment: 2, bankTransfersToConfirm: 1, paymentsUnderReview: 0 });
+    expect(o.sales!.last7Days["GHS"]).toEqual({ orders: 1, revenue: paid.order.total });
+    // stock: fixture product has 5 on hand with 1 sold (deducted) and 2 reserved by the unpaid orders → low
+    expect(o.stock!.low.length).toBeGreaterThan(0); expect(o.stock!.low[0]).toMatchObject({ name: "Cap" }); expect(o.stock!.threshold).toBe(5);
+    // pending review/ticket counts exist for the owner
+    expect(o.reviewsToModerate).toBe(0); expect(o.openTickets).toBe(0);
+    // a finance user sees orders + sales but not stock/inbox; a support user sees only tickets + orders
+    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["finance"]; });
+    const fin = mk(); await signInStaff(fin, PORTAL, "owner@shop.test", PW); const f = (await fin.admin(PORTAL).overview()).data!;
+    expect(Object.keys(f).sort()).toEqual(["orders", "sales"]);
+    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["support"]; });
+    const sup = mk(); await signInStaff(sup, PORTAL, "owner@shop.test", PW); expect(Object.keys((await sup.admin(PORTAL).overview()).data!).sort()).toEqual(["openTickets", "orders"]);
+    expect((await mk().admin(PORTAL).overview()).status).toBe(404);
+  });
+});

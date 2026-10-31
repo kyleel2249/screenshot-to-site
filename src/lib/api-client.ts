@@ -121,6 +121,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
       receivePurchaseOrder: (id: string, lines: { variantId: string; qty: number }[]) => post(`${portal}/api/purchase-orders/receive`, { id, lines }),
       preorderQueue: () => get<PreorderQueueItem[]>(`${portal}/api/preorder-queue`),
       allocatePreorder: (orderId: string) => post(`${portal}/api/orders/allocate-preorder`, { orderId }),
+      overview: () => get<Overview>(`${portal}/api/overview`),
       business: () => get<BusinessInfo>(`${portal}/api/business`),
       saveBusiness: (b: BusinessInfo) => post<{ business: BusinessInfo }>(`${portal}/api/business`, b),
       confirmBankTransfer: (orderId: string, amount: number, reference: string) => post<{ result: string }>(`${portal}/api/orders/confirm-bank-transfer`, { orderId, amount, reference }),
@@ -158,6 +159,12 @@ export type PayMethod = "card" | "mobile_money" | "bank_transfer";
 export const PAY_METHOD_LABELS: Record<PayMethod, string> = { card: "Card", mobile_money: "Mobile Money", bank_transfer: "Bank transfer" };
 export interface BankTransferInstructions { instructions: string; reference: string; amount: number; currency: "GHS" | "USD"; holdUntil: number }
 export interface PreorderQueueItem { orderId: string; ref: string; paidAt: number; items: { variantId: string; name: string; qty: number }[]; canAllocate: boolean }
+export interface Overview {
+  orders?: { toFulfil: number; awaitingPayment: number; bankTransfersToConfirm: number; paymentsUnderReview: number; cancellationRequests: number; refundsPending: number; preordersWaiting: number; newQuotes: number };
+  stock?: { outOfStock: number; low: { variantId: string; name: string; available: number }[]; threshold: number; incomingUnits: number };
+  reviewsToModerate?: number; openTickets?: number;
+  sales?: { last7Days: Record<string, { orders: number; revenue: number }>; last30Days: Record<string, { orders: number; revenue: number }> };
+}
 export interface Supplier { id: string; name: string; contact: string; email: string; phone: string; country: string; notes: string; active: boolean }
 export interface PurchaseOrder { id: string; ref: string; supplierId: string; supplier: string; status: "draft" | "ordered" | "partially_received" | "received" | "cancelled"; currency: string; lines: { variantId: string; name: string; qty: number; unitCost: number; received: number }[]; expectedAt?: string; notes: string; createdAt: number; receipts: { at: number; by: string; lines: { variantId: string; qty: number }[] }[] }
 export interface StaffMember { id: string; email: string; roles: string[]; state: "active" | "invited" | "suspended"; createdAt: number }
