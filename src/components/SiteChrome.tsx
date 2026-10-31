@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { resetWishlist, useWishlist } from "@/lib/wishlist";
 import { useCatalog } from "@/lib/catalog-store";
 import { ConsentLink } from "@/components/ConsentBanner";
+import logo from "@/assets/logo.png";
 import { childrenOf, topLevel } from "@/lib/domain/categories";
 import type { DisplayMode } from "@/lib/domain/money";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -16,10 +17,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 
 /** Primary links shown in the desktop bar (Shop and Categories carry menus). */
 const PRIMARY = [
-  { to: "/new-arrivals", label: "New Arrivals" },
-  { to: "/deals", label: "Deals" },
-  { to: "/about", label: "About" },
-  { to: "/contact", label: "Contact" },
+  { to: "/new-arrivals", label: "New Arrivals", wideOnly: false },
+  { to: "/deals", label: "Deals", wideOnly: false },
+  { to: "/about", label: "About", wideOnly: true },
+  { to: "/contact", label: "Contact", wideOnly: true },
 ] as const;
 /** Extra links kept out of the bar so it never crowds; they live under "More" and in the mobile drawer. */
 const MORE = [
@@ -27,6 +28,11 @@ const MORE = [
   { to: "/wholesale", label: "Wholesale" },
   { to: "/faq", label: "FAQ" },
 ] as const;
+/** Shown at the top of "More" only while the bar is too narrow to hold them (below 1700px). */
+const MORE_NARROW = PRIMARY.filter((n) => n.wideOnly);
+/** The full bar (Home, About, Contact inline) needs ~1700px because the logo and wordmark take room; below that those links live in menus.
+ *  Class names are written out in full on purpose: Tailwind only generates CSS for names it can find literally in the source. */
+const hideBelowWide = "max-[1699px]:hidden";
 
 const navLink =
   "relative flex h-full items-center text-[15px] font-medium text-foreground/80 transition-colors hover:text-primary focus-visible:text-primary after:absolute after:inset-x-0 after:bottom-4 after:h-0.5 after:origin-left after:scale-x-0 after:bg-gold after:transition-transform motion-reduce:after:transition-none hover:after:scale-x-100 focus-visible:after:scale-x-100";
@@ -124,13 +130,16 @@ export function SiteHeader() {
         Pre-orders open on selected imported items — expected arrival windows shown on each product
       </div>
       <header className="sticky top-0 z-40 border-t-[3px] border-gold border-b border-b-border bg-background text-foreground shadow-sm">
-        <div className="container-x flex h-[72px] items-center gap-3 xl:gap-8">
-          <Link to="/" className="shrink-0 font-display text-lg font-bold tracking-wide text-primary sm:text-xl" aria-label="Dera Darko Trade — home">
-            DERA <span className="text-gold-dark">DARKO</span> TRADE
+        <div className="mx-auto flex h-[72px] w-full max-w-[110rem] items-center gap-3 px-4 md:px-8 xl:gap-6">
+          <Link to="/" className="flex shrink-0 items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Dera Darko Trade — home">
+            <img src={logo} alt="" width={360} height={219} decoding="async" className="h-11 w-auto sm:h-12" />
+            <span className="hidden font-display text-lg font-bold tracking-wide text-primary sm:inline">
+              DERA <span className="text-gold-dark">DARKO</span> TRADE
+            </span>
           </Link>
 
-          <nav className="hidden h-full items-stretch gap-7 xl:flex" aria-label="Main">
-            <Link to="/" activeOptions={{ exact: true }} className={navLink} activeProps={{ className: navActive }}>Home</Link>
+          <nav className={`hidden h-full items-stretch gap-5 min-[1700px]:gap-7 xl:flex`} aria-label="Main">
+            <Link to="/" activeOptions={{ exact: true }} className={`${navLink} ${hideBelowWide}`} activeProps={{ className: navActive }}>Home</Link>
             <div className="group relative flex h-full items-center">
               <Link to="/shop" search={{}} className={`${navLink} gap-1`} activeProps={{ className: navActive }}>Shop <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></Link>
               <div className={`${menuPanel} w-[44rem] max-w-[90vw]`}>
@@ -153,16 +162,17 @@ export function SiteHeader() {
                 <li className="border-t border-border pt-1"><Link to="/shop" search={{}} className="block rounded-md px-2 py-1.5 font-medium text-primary hover:bg-gold/15">All products</Link></li>
               </ul>
             </div>
-            {PRIMARY.map((n) => <Link key={n.to} to={n.to} className={navLink} activeProps={{ className: navActive }}>{n.label}</Link>)}
+            {PRIMARY.map((n) => <Link key={n.to} to={n.to} className={n.wideOnly ? `${navLink} ${hideBelowWide}` : navLink} activeProps={{ className: navActive }}>{n.label}</Link>)}
             <div className="group relative flex h-full items-center">
               <button type="button" className={`${navLink} gap-1`} aria-haspopup="true">More <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></button>
               <ul className={`${menuPanel} w-48 space-y-1 text-sm`}>
+                {MORE_NARROW.map((n) => <li key={n.to} className="min-[1700px]:hidden"><Link to={n.to} className="block rounded-md px-2 py-1.5 text-foreground/80 hover:bg-gold/15 hover:text-primary">{n.label}</Link></li>)}
                 {MORE.map((n) => <li key={n.to}><Link to={n.to} className="block rounded-md px-2 py-1.5 text-foreground/80 hover:bg-gold/15 hover:text-primary">{n.label}</Link></li>)}
               </ul>
             </div>
           </nav>
 
-          <div className="ml-auto hidden w-full max-w-md sm:block xl:max-w-sm 2xl:max-w-md"><SearchForm id="header-search" /></div>
+          <div className="ml-auto hidden min-w-0 max-w-md flex-1 sm:block"><SearchForm id="header-search" /></div>
 
           <div className="ml-auto flex items-center gap-1 sm:ml-0">
             <button type="button" className={`${iconBtn} sm:hidden`} aria-label="Search products" aria-expanded={searchRow} onClick={() => setSearchRow((v) => !v)}>
