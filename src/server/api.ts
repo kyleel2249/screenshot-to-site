@@ -8,11 +8,12 @@ import { SEED_CATEGORIES } from "../lib/domain/categories";
 import type { MemoryDb } from "./db";
 import type { Persistence } from "./persistence/transact";
 import { transact } from "./persistence/transact";
-import { requirePermission } from "./rbac";
+import { Forbidden, requirePermission } from "./rbac";
 import type { R2Like } from "./media";
 import { storeImage, serveImage, MEDIA_MAX_BYTES, sniffImage } from "./media";
 import { openAccessActor } from "./open-access-actor";
 import { createProduct, setPublishedState, ValidationError } from "./services/catalog-admin";
+import type { Availability } from "../lib/domain/status";
 
 export interface Env {
   SESSION_SECRET: string; SITE_ORIGIN: string; ADMIN_BOOTSTRAP_REF_HASH?: string; ADMIN_PORTAL_PATH?: string;
@@ -57,6 +58,20 @@ function ensureCategories(db: MemoryDb) {
     db.categories = SEED_CATEGORIES.map((c) => ({ ...c }));
   }
   return db.categories;
+}
+
+function asMinor(v: unknown): number | undefined {
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return Math.round(n);
+}
+
+function normalizeAvailability(raw: unknown): Availability {
+  const s = String(raw ?? "available");
+  if (s === "enquiry") return "temporarily_unavailable";
+  const allowed: Availability[] = ["available", "pre_order", "out_of_stock", "coming_soon", "temporarily_unavailable", "discontinued"];
+  return (allowed.includes(s as Availability) ? s : "available") as Availability;
 }
 
 function listAdminProducts(db: MemoryDb) {
@@ -141,24 +156,47 @@ export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps
         return json(await transact(p, (db) => listAdminProducts(db)));
       }
       if (sub === "/products" && req.method === "POST") {
+        requirePermission(actor, "product.write");
+        const priceGhs = asMinor(body.priceGhs);
+        const priceUsd = asMinor(body.priceUsd);
+        const onHand = asMinor(body.onHand) ?? 0;
+        let published = body.published === true;
+        if (published && priceGhs === undefined && priceUsd === undefined) {
+          published = false;
+        }
+        const availability = normalizeAvailability(body.availability);
+        const name = String(body.name ?? "").trim();
+        let sku = String(body.sku ?? "").trim();
+        if (!sku && name) sku = `DDT-GEN-${Date.now().toString(36).toUpperCase()}`;
+
         const row = await transact(p, (db) => {
           ensureCategories(db);
+          let categoryId = String(body.categoryId ?? "");
+          if (!db.categories.some((c) => c.id === categoryId)) {
+            const fallback = db.categories.find((c) => c.parentId) ?? db.categories[0];
+            if (!fallback) throw new ValidationError(["No categories available. Refresh and try again."]);
+            categoryId = fallback.id;
+          }
+          let image = String(body.image ?? "/products/placeholder.png");
+          if (image.startsWith("blob:")) image = "/products/placeholder.png";
+
           return createProduct(db, actor, {
-            name: String(body.name ?? ""),
-            categoryId: String(body.categoryId ?? ""),
-            shortDescription: String(body.shortDescription ?? ""),
+            name,
+            categoryId,
+            shortDescription: String(body.shortDescription ?? name),
             description: body.description ? String(body.description) : undefined,
-            image: String(body.image ?? "/products/placeholder.png"),
-            imageAlt: String(body.imageAlt ?? body.name ?? "Product"),
-            sku: String(body.sku ?? ""),
-            priceGhs: body.priceGhs !== undefined && body.priceGhs !== "" ? Number(body.priceGhs) : undefined,
-            priceUsd: body.priceUsd !== undefined && body.priceUsd !== "" ? Number(body.priceUsd) : undefined,
-            onHand: body.onHand !== undefined ? Number(body.onHand) : 0,
-            published: body.published === true,
-            availability: (body.availability as "available" | undefined) ?? "available",
+            image,
+            imageAlt: String(body.imageAlt ?? name || "Product"),
+            sku,
+            priceGhs,
+            priceUsd,
+            onHand,
+            published,
+            availability,
+            preOrderEnabled: availability === "pre_order",
           });
         });
-        return json({ id: row.id, slug: row.slug });
+        return json({ id: row.id, slug: row.slug, published });
       }
       if (sub === "/products/publish" && req.method === "POST") {
         await transact(p, (db) => setPublishedState(db, actor, String(body.productId ?? ""), body.published === true));
@@ -221,10 +259,11 @@ export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps
       return json({ ok: true });
     } catch (e) {
       if (e instanceof ValidationError) return json({ error: e.message, errors: e.errors }, 422);
+      if (e instanceof Forbidden) return json({ error: e.message || "Forbidden", errors: [e.message || "Forbidden"] }, 403);
       console.error(e);
-      return json({ error: "Something went wrong" }, 500);
+      return json({ error: e instanceof Error ? e.message : "Something went wrong", errors: [e instanceof Error ? e.message : "Something went wrong"] }, 500);
     }
   }
 
-  return json({ error: "Not found" }, 404);
+  return json({ error: "Not found", errors: ["Not found"] }, 404);
 }
