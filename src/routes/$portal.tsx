@@ -49,7 +49,7 @@ function Dashboard() {
         <h1 className="font-display text-2xl font-bold">Dashboard <span className="badge-label ml-2">{roles.join(", ")}</span></h1>
         <button className="rounded-full border border-border px-4 py-2 text-sm" onClick={() => void api.logout().then(() => setState("login"))}>Sign out</button>
       </header>
-      <nav className="mt-6 flex gap-2" aria-label="Sections" role="tablist">
+      <nav className="mt-6 flex flex-wrap gap-2" aria-label="Sections" role="tablist">
         {(["overview", "products", "orders", "purchasing", "business", "reviews", "content", "quotes", "support", "staff", "analytics", "categories", "shipping", "discounts", "audit"] as Tab[]).map((t) => <button key={t} role="tab" aria-selected={tab === t} onClick={() => setTab(t)} className={`rounded-full px-4 py-2 text-sm font-medium capitalize ${tab === t ? "bg-primary text-primary-foreground" : "border border-border"}`}>{t}</button>)}
       </nav>
       <div className="mt-6">{tab === "products" ? <Products admin={admin} /> : tab === "orders" ? <Orders admin={admin} /> : tab === "overview" ? <OverviewTab admin={admin} go={setTab} /> : tab === "business" ? <BusinessTab admin={admin} /> : tab === "purchasing" ? <Purchasing admin={admin} /> : tab === "reviews" ? <ReviewsTab admin={admin} /> : tab === "content" ? <ContentTab admin={admin} /> : tab === "quotes" ? <Quotes admin={admin} /> : tab === "staff" ? <StaffTab admin={admin} /> : tab === "support" ? <Support admin={admin} /> : tab === "analytics" ? <AnalyticsView admin={admin} /> : tab === "categories" ? <Categories admin={admin} /> : tab === "shipping" ? <Shipping admin={admin} /> : tab === "discounts" ? <Discounts admin={admin} /> : <Audit admin={admin} />}</div>
