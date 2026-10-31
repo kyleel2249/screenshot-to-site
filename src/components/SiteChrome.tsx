@@ -1,76 +1,237 @@
-import { Link } from "@tanstack/react-router";
-import { ShoppingBag, Menu, X, ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { ChevronDown, Heart, Menu, Search, ShoppingCart, User } from "lucide-react";
+import { useState, type FormEvent } from "react";
 import { useCart } from "@/lib/cart";
 import { useCurrency } from "@/lib/currency";
 import { useSite } from "@/lib/site";
 import { waLink } from "@/lib/business";
+import { api } from "@/lib/api";
+import { resetWishlist, useWishlist } from "@/lib/wishlist";
 import { useCatalog } from "@/lib/catalog-store";
 import { ConsentLink } from "@/components/ConsentBanner";
 import { childrenOf, topLevel } from "@/lib/domain/categories";
 import type { DisplayMode } from "@/lib/domain/money";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+
+/** Primary links shown in the desktop bar (Shop and Categories carry menus). */
+const PRIMARY = [
+  { to: "/new-arrivals", label: "New Arrivals" },
+  { to: "/deals", label: "Deals" },
+  { to: "/about", label: "About" },
+  { to: "/contact", label: "Contact" },
+] as const;
+/** Extra links kept out of the bar so it never crowds; they live under "More" and in the mobile drawer. */
+const MORE = [
+  { to: "/preorders", label: "Pre-orders" },
+  { to: "/wholesale", label: "Wholesale" },
+  { to: "/faq", label: "FAQ" },
+] as const;
+
+const navLink =
+  "relative flex h-full items-center text-[15px] font-medium text-foreground/80 transition-colors hover:text-primary focus-visible:text-primary after:absolute after:inset-x-0 after:bottom-4 after:h-0.5 after:origin-left after:scale-x-0 after:bg-gold after:transition-transform motion-reduce:after:transition-none hover:after:scale-x-100 focus-visible:after:scale-x-100";
+const navActive = "text-primary after:scale-x-100";
+const iconBtn =
+  "relative grid h-11 w-11 shrink-0 place-items-center rounded-full text-primary transition-colors hover:bg-gold/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const menuPanel =
+  "invisible absolute left-0 top-full z-50 rounded-b-xl border border-t-0 border-border bg-background p-5 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100 motion-reduce:transition-none";
+
+function Badge({ n }: { n: number }) {
+  if (n <= 0) return null;
+  return <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-gold px-1 text-[10px] font-bold text-gold-foreground">{n > 99 ? "99+" : n}</span>;
+}
+
+function CurrencySelect({ id, className = "" }: { id: string; className?: string }) {
+  const { mode, setMode } = useCurrency();
+  return (
+    <>
+      <label className="sr-only" htmlFor={id}>Display currency</label>
+      <select id={id} value={mode} onChange={(e) => setMode(e.target.value as DisplayMode)} className={`rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground ${className}`}>
+        <option value="GHS">GH₵</option><option value="USD">US$</option><option value="DUAL">Both</option>
+      </select>
+    </>
+  );
+}
+
+/** Product search. Sends the words to the shop page (`/shop?q=`), which already filters the live catalogue. */
+function SearchForm({ id, autoFocus = false, onDone }: { id: string; autoFocus?: boolean; onDone?: () => void }) {
+  const navigate = useNavigate();
+  const [value, setValue] = useState("");
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const q = value.trim();
+    void navigate({ to: "/shop", search: q ? { q } : {} });
+    onDone?.();
+  };
+  return (
+    <form role="search" onSubmit={submit} className="relative w-full">
+      <label htmlFor={id} className="sr-only">Search products</label>
+      <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-muted-foreground" />
+      <input
+        id={id} type="search" name="q" value={value} onChange={(e) => setValue(e.target.value)} autoFocus={autoFocus}
+        placeholder="Search products…" autoComplete="off" enterKeyHint="search"
+        className="h-11 w-full rounded-lg border-2 border-input bg-background pl-10 pr-3 text-sm text-foreground placeholder:text-muted-foreground transition-colors focus-visible:border-gold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      />
+    </form>
+  );
+}
+
+function AccountMenu({ signedIn }: { signedIn: boolean }) {
+  const navigate = useNavigate();
+  const { afterLogout } = useCart();
+  const signOut = () => void api.logout().then(() => { resetWishlist(); afterLogout(); void navigate({ to: "/" }); });
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button type="button" aria-label={signedIn ? "Account menu" : "Sign in or create an account"} className={`${iconBtn} bg-gold/15`}>
+          <User className="h-5 w-5" aria-hidden="true" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        {signedIn ? (
+          <>
+            <DropdownMenuItem asChild><Link to="/account">My account</Link></DropdownMenuItem>
+            <DropdownMenuItem asChild><Link to="/track" search={{ ref: "" }}>Track an order</Link></DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={signOut}>Sign out</DropdownMenuItem>
+          </>
+        ) : (
+          <>
+            <DropdownMenuItem asChild><Link to="/login">Sign in</Link></DropdownMenuItem>
+            <DropdownMenuItem asChild><Link to="/register">Create an account</Link></DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem asChild><Link to="/track" search={{ ref: "" }}>Track an order</Link></DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export function SiteHeader() {
   const { count } = useCart();
   const { categories } = useCatalog();
-  const { mode, setMode } = useCurrency();
-  const [open, setOpen] = useState(false);
+  const wish = useWishlist();
+  const signedIn = wish.status === "ready";
+  const savedCount = signedIn ? wish.slugs.size : 0;
+  const [drawer, setDrawer] = useState(false);
+  const [searchRow, setSearchRow] = useState(false);
   const tops = topLevel(categories);
-  const nav = [
-    { to: "/new-arrivals", label: "New" },
-    { to: "/preorders", label: "Pre-orders" },
-    { to: "/deals", label: "Deals" },
-    { to: "/wholesale", label: "Wholesale" },
-    { to: "/contact", label: "Contact" },
-  ] as const;
+  const close = () => setDrawer(false);
   return (
-    <header className="sticky top-0 z-40 bg-primary text-primary-foreground">
-      <div className="bg-gold text-gold-foreground text-center text-xs font-medium py-1.5 px-4">
+    <>
+      <div className="bg-primary text-primary-foreground text-center text-xs font-medium py-1.5 px-4">
         Pre-orders open on selected imported items — expected arrival windows shown on each product
       </div>
-      <div className="container-x flex h-16 items-center justify-between gap-4">
-        <Link to="/" className="font-display text-xl font-bold tracking-wide">
-          DERA <span className="text-gold">DARKO</span> TRADE
-        </Link>
-        <nav className="hidden lg:flex items-center gap-6 text-sm font-medium" aria-label="Main">
-          <div className="group relative">
-            <Link to="/shop" search={{}} className="inline-flex items-center gap-1 hover:text-gold transition-colors">Shop <ChevronDown className="h-3.5 w-3.5" /></Link>
-            <div className="invisible absolute left-0 top-full z-50 w-[44rem] max-w-[90vw] rounded-b-xl bg-primary p-6 opacity-0 shadow-xl transition group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
-              <ul className="grid grid-cols-3 gap-x-8 gap-y-5">
-                {tops.map((c) => (
-                  <li key={c.id}>
-                    <Link to="/shop" search={{ category: c.slug }} className="font-semibold text-gold">{c.name}</Link>
-                    <ul className="mt-1.5 space-y-1 text-xs text-primary-foreground/80">
-                      {childrenOf(categories, c.id).slice(0, 4).map((s) => <li key={s.id}><Link to="/shop" search={{ category: s.slug }} className="hover:text-gold">{s.name}</Link></li>)}
-                    </ul>
-                  </li>
-                ))}
+      <header className="sticky top-0 z-40 border-t-[3px] border-gold border-b border-b-border bg-background text-foreground shadow-sm">
+        <div className="container-x flex h-[72px] items-center gap-3 xl:gap-8">
+          <Link to="/" className="shrink-0 font-display text-lg font-bold tracking-wide text-primary sm:text-xl" aria-label="Dera Darko Trade — home">
+            DERA <span className="text-gold-dark">DARKO</span> TRADE
+          </Link>
+
+          <nav className="hidden h-full items-stretch gap-7 xl:flex" aria-label="Main">
+            <Link to="/" activeOptions={{ exact: true }} className={navLink} activeProps={{ className: navActive }}>Home</Link>
+            <div className="group relative flex h-full items-center">
+              <Link to="/shop" search={{}} className={`${navLink} gap-1`} activeProps={{ className: navActive }}>Shop <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></Link>
+              <div className={`${menuPanel} w-[44rem] max-w-[90vw]`}>
+                <ul className="grid grid-cols-3 gap-x-8 gap-y-5">
+                  {tops.map((c) => (
+                    <li key={c.id}>
+                      <Link to="/shop" search={{ category: c.slug }} className="font-semibold text-primary hover:underline">{c.name}</Link>
+                      <ul className="mt-1.5 space-y-1 text-sm text-muted-foreground">
+                        {childrenOf(categories, c.id).slice(0, 4).map((s) => <li key={s.id}><Link to="/shop" search={{ category: s.slug }} className="hover:text-primary hover:underline">{s.name}</Link></li>)}
+                      </ul>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <div className="group relative flex h-full items-center">
+              <button type="button" className={`${navLink} gap-1`} aria-haspopup="true">Categories <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></button>
+              <ul className={`${menuPanel} w-64 space-y-1 text-sm`}>
+                {tops.map((c) => <li key={c.id}><Link to="/shop" search={{ category: c.slug }} className="block rounded-md px-2 py-1.5 text-foreground/80 hover:bg-gold/15 hover:text-primary">{c.name}</Link></li>)}
+                <li className="border-t border-border pt-1"><Link to="/shop" search={{}} className="block rounded-md px-2 py-1.5 font-medium text-primary hover:bg-gold/15">All products</Link></li>
               </ul>
             </div>
+            {PRIMARY.map((n) => <Link key={n.to} to={n.to} className={navLink} activeProps={{ className: navActive }}>{n.label}</Link>)}
+            <div className="group relative flex h-full items-center">
+              <button type="button" className={`${navLink} gap-1`} aria-haspopup="true">More <ChevronDown className="h-3.5 w-3.5" aria-hidden="true" /></button>
+              <ul className={`${menuPanel} w-48 space-y-1 text-sm`}>
+                {MORE.map((n) => <li key={n.to}><Link to={n.to} className="block rounded-md px-2 py-1.5 text-foreground/80 hover:bg-gold/15 hover:text-primary">{n.label}</Link></li>)}
+              </ul>
+            </div>
+          </nav>
+
+          <div className="ml-auto hidden w-full max-w-md sm:block xl:max-w-sm 2xl:max-w-md"><SearchForm id="header-search" /></div>
+
+          <div className="ml-auto flex items-center gap-1 sm:ml-0">
+            <button type="button" className={`${iconBtn} sm:hidden`} aria-label="Search products" aria-expanded={searchRow} onClick={() => setSearchRow((v) => !v)}>
+              <Search className="h-5 w-5" aria-hidden="true" />
+            </button>
+            <CurrencySelect id="display-currency" className="mr-1 hidden xl:block" />
+            <Link to={signedIn ? "/account" : "/login"} hash={signedIn ? "saved" : undefined} className={iconBtn} aria-label={signedIn ? `Saved items, ${savedCount}` : "Sign in to see your saved items"}>
+              <Heart className="h-5 w-5" aria-hidden="true" /><Badge n={savedCount} />
+            </Link>
+            <Link to="/cart" className={iconBtn} aria-label={`Cart, ${count} ${count === 1 ? "item" : "items"}`}>
+              <ShoppingCart className="h-5 w-5" aria-hidden="true" /><Badge n={count} />
+            </Link>
+            <AccountMenu signedIn={signedIn} />
+            <button type="button" className={`${iconBtn} xl:hidden`} aria-label="Open menu" aria-expanded={drawer} onClick={() => setDrawer(true)}>
+              <Menu className="h-5 w-5" aria-hidden="true" />
+            </button>
           </div>
-          {nav.map((n) => <Link key={n.to} to={n.to} className="hover:text-gold transition-colors" activeProps={{ className: "text-gold" }}>{n.label}</Link>)}
-        </nav>
-        <div className="flex items-center gap-2">
-          <label className="sr-only" htmlFor="display-currency">Display currency</label>
-          <select id="display-currency" value={mode} onChange={(e) => setMode(e.target.value as DisplayMode)} className="rounded-md border border-primary-foreground/30 bg-primary px-2 py-1 text-xs">
-            <option value="GHS">GH₵</option><option value="USD">US$</option><option value="DUAL">Both</option>
-          </select>
-          <Link to="/cart" className="relative p-2 hover:text-gold transition-colors" aria-label={`Cart, ${count} items`}>
-            <ShoppingBag className="h-5 w-5" />
-            {count > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-gold px-1 text-[10px] font-bold text-gold-foreground">{count}</span>}
-          </Link>
-          <button className="lg:hidden p-2" onClick={() => setOpen(!open)} aria-label="Menu" aria-expanded={open}>{open ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}</button>
         </div>
-      </div>
-      {open && (
-        <nav className="lg:hidden max-h-[70vh] overflow-y-auto border-t border-primary-foreground/10 container-x py-4 flex flex-col gap-3" aria-label="Mobile">
-          <Link to="/shop" search={{}} onClick={() => setOpen(false)} className="font-semibold text-gold">All products</Link>
-          {tops.map((c) => <Link key={c.id} to="/shop" search={{ category: c.slug }} onClick={() => setOpen(false)}>{c.name}</Link>)}
-          <hr className="border-primary-foreground/10" />
-          {nav.map((n) => <Link key={n.to} to={n.to} onClick={() => setOpen(false)}>{n.label}</Link>)}
-        </nav>
-      )}
-    </header>
+        {searchRow && <div className="border-t border-border px-4 py-3 sm:hidden"><SearchForm id="header-search-mobile" autoFocus onDone={() => setSearchRow(false)} /></div>}
+      </header>
+
+      <Sheet open={drawer} onOpenChange={setDrawer}>
+        <SheetContent side="right" className="w-[85vw] max-w-sm overflow-y-auto bg-background p-0">
+          <SheetHeader className="border-b border-border p-5 text-left">
+            <SheetTitle className="font-display text-primary">Menu</SheetTitle>
+            <SheetDescription className="sr-only">Site navigation</SheetDescription>
+          </SheetHeader>
+          <nav className="flex flex-col p-3 text-base" aria-label="Mobile">
+            <Link to="/" onClick={close} className="rounded-md px-3 py-3 font-medium hover:bg-gold/15">Home</Link>
+            <Link to="/shop" search={{}} onClick={close} className="rounded-md px-3 py-3 font-medium hover:bg-gold/15">Shop all products</Link>
+            <div className="px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Categories</div>
+            {tops.map((c) => {
+              const subs = childrenOf(categories, c.id);
+              return subs.length === 0 ? (
+                <Link key={c.id} to="/shop" search={{ category: c.slug }} onClick={close} className="rounded-md px-3 py-2.5 hover:bg-gold/15">{c.name}</Link>
+              ) : (
+                <details key={c.id} className="group rounded-md">
+                  <summary className="flex cursor-pointer list-none items-center justify-between rounded-md px-3 py-2.5 hover:bg-gold/15">
+                    {c.name}<ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" aria-hidden="true" />
+                  </summary>
+                  <ul className="mb-1 ml-3 border-l border-border pl-3 text-sm">
+                    <li><Link to="/shop" search={{ category: c.slug }} onClick={close} className="block rounded-md px-3 py-2 font-medium text-primary">All {c.name}</Link></li>
+                    {subs.map((s) => <li key={s.id}><Link to="/shop" search={{ category: s.slug }} onClick={close} className="block rounded-md px-3 py-2 text-foreground/80 hover:bg-gold/15">{s.name}</Link></li>)}
+                  </ul>
+                </details>
+              );
+            })}
+            <div className="mt-2 border-t border-border pt-2" />
+            {[...PRIMARY, ...MORE].map((n) => <Link key={n.to} to={n.to} onClick={close} className="rounded-md px-3 py-3 font-medium hover:bg-gold/15">{n.label}</Link>)}
+            <div className="mt-2 border-t border-border pt-2" />
+            {signedIn ? (
+              <>
+                <Link to="/account" onClick={close} className="rounded-md px-3 py-3 font-medium hover:bg-gold/15">My account</Link>
+                <Link to="/account" hash="saved" onClick={close} className="rounded-md px-3 py-3 font-medium hover:bg-gold/15">Saved items{savedCount > 0 ? ` (${savedCount})` : ""}</Link>
+              </>
+            ) : (
+              <>
+                <Link to="/login" onClick={close} className="rounded-md px-3 py-3 font-medium hover:bg-gold/15">Sign in</Link>
+                <Link to="/register" onClick={close} className="rounded-md px-3 py-3 font-medium hover:bg-gold/15">Create an account</Link>
+              </>
+            )}
+            <Link to="/track" search={{ ref: "" }} onClick={close} className="rounded-md px-3 py-3 font-medium hover:bg-gold/15">Track an order</Link>
+            <div className="mt-3 flex items-center gap-2 px-3 text-sm">
+              <span>Currency</span><CurrencySelect id="display-currency-mobile" />
+            </div>
+          </nav>
+        </SheetContent>
+      </Sheet>
+    </>
   );
 }
 

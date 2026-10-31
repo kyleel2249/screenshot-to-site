@@ -26,10 +26,19 @@ export function productsIn(list: StoreProduct[], categories: CategoryNode[], cat
 /** Lowest current GHS price in minor units (sale price when present); products without a GHS price sort last. */
 export const cheapestGhs = (p: StoreProduct) => (p.salePrice ?? p.price).GHS ?? Number.MAX_SAFE_INTEGER;
 
-export function search(list: StoreProduct[], q: string): StoreProduct[] {
-  const n = q.trim().toLowerCase();
-  if (!n) return list;
-  return list.filter((p) => p.name.toLowerCase().includes(n) || (p.variantId.split("::")[1] ?? "").toLowerCase().includes(n));
+/**
+ * Every word typed must appear somewhere in the product's name, SKU, short description or category (its own and its parent's name).
+ * `categories` is optional so existing callers keep working; without it only name, SKU and description are searched.
+ */
+export function search(list: StoreProduct[], q: string, categories: CategoryNode[] = []): StoreProduct[] {
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return list;
+  const byId = new Map(categories.map((c) => [c.id, c]));
+  return list.filter((p) => {
+    const own = byId.get(p.categoryId), parent = own?.parentId ? byId.get(own.parentId) : undefined;
+    const hay = [p.name, p.variantId.split("::")[1] ?? "", p.shortDescription, own?.name ?? "", parent?.name ?? ""].join(" ").toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
 }
 export function sortProducts(list: StoreProduct[], sort: "newest" | "price-asc" | "price-desc" | undefined): StoreProduct[] {
   return [...list].sort((a, b) => sort === "price-asc" ? cheapestGhs(a) - cheapestGhs(b) : sort === "price-desc" ? cheapestGhs(b) - cheapestGhs(a) : b.createdAt.localeCompare(a.createdAt));

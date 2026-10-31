@@ -34,7 +34,7 @@ function Shop() {
   const navigate = useNavigate({ from: "/shop" });
   const { products, categories } = useCatalog();
   const cat = category ? findBySlug(categories, category) : undefined;
-  let list = search(productsIn(products, categories, cat?.id), q ?? "");
+  let list = search(productsIn(products, categories, cat?.id), q ?? "", categories);
   if (availability) list = list.filter((p) => p.availability === availability);
   // Attribute filters (make/year for cars, size for shoes, …) apply to the profile of the chosen category branch.
   const profile = cat?.filterProfile;
