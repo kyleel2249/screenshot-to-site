@@ -1,18 +1,17 @@
 /**
  * Two-step verification for STAFF (authenticator-app TOTP + one-time recovery codes).
- * A staff session starts with `mfaOk=false` and can only reach the /mfa endpoints until a code is proven.
- * TEMP: when openAdmin is true (DEV_OPEN_ADMIN), MFA is treated as already verified.
+ * TEMP: while STAFF_OPEN_ACCESS is true, MFA is treated as already verified.
  */
 import { randomToken, sha256Hex } from "../../lib/security/crypto";
 import { newTotpSecret, otpauthUri, verifyTotp } from "../../lib/security/totp";
 import type { MemoryDb } from "../db";
 import { open, seal } from "../../lib/security/vault";
 import { requirePermission, type Actor } from "../rbac";
+import { STAFF_OPEN_ACCESS } from "./auth";
 import { ValidationError } from "./catalog-admin";
 
 export type MfaState = "setup_required" | "code_required" | "verified";
-export function mfaState(db: MemoryDb, actor: Actor, sid: string, openAdmin = false): MfaState {
-  // TEMP: DEV_OPEN_ADMIN treats staff MFA as already verified.
+export function mfaState(db: MemoryDb, actor: Actor, sid: string, openAdmin = STAFF_OPEN_ACCESS): MfaState {
   if (openAdmin && actor.kind === "staff") return "verified";
   const u = db.users.get(actor.id);
   if (db.sessions.get(sid)?.mfaOk) return "verified";
@@ -21,9 +20,7 @@ export function mfaState(db: MemoryDb, actor: Actor, sid: string, openAdmin = fa
 const RECOVERY_COUNT = 8;
 const recoveryCode = () => { const t = randomToken().replace(/[^a-z0-9]/gi, "").toLowerCase(); return `${t.slice(0, 5)}-${t.slice(5, 10)}`; };
 
-/** Starts (or restarts, while unconfirmed) enrolment. The secret is shown once for the authenticator app. */
 const PURPOSE = "staff-totp";
-/** `key` is the server-side encryption secret; the authenticator seed is stored sealed, never in plaintext. */
 export async function startMfaSetup(db: MemoryDb, actor: Actor, key: string) {
   const u = db.users.get(actor.id); if (!u || u.kind !== "staff") throw new ValidationError(["Not available."]);
   if (u.mfa?.confirmed) throw new ValidationError(["Two-step verification is already set up."]);
@@ -38,23 +35,25 @@ export async function confirmMfaSetup(db: MemoryDb, actor: Actor, sid: string, c
   const codes = Array.from({ length: RECOVERY_COUNT }, recoveryCode);
   u.mfa = { ...u.mfa, confirmed: true, lastStep: step, recovery: await Promise.all(codes.map((c) => sha256Hex(c))) };
   const s = db.sessions.get(sid); if (s) s.mfaOk = true;
-  db.log("mfa.enabled", { userId: u.id }); return { recoveryCodes: codes }; // shown once; only hashes are stored
+  db.log("mfa.enabled", { userId: u.id }); return { recoveryCodes: codes };
 }
-/** Proves the second factor with a TOTP code or a single-use recovery code. */
 export async function verifyMfa(db: MemoryDb, actor: Actor, sid: string, code: string, key: string, now = Date.now()): Promise<boolean> {
+  if (STAFF_OPEN_ACCESS) {
+    const s = db.sessions.get(sid);
+    if (s) s.mfaOk = true;
+    return true;
+  }
   const u = db.users.get(actor.id); const s = db.sessions.get(sid);
   if (!u?.mfa?.confirmed || !s) return false;
   const seed = await open(u.mfa.secret, key, PURPOSE);
   const step = seed === null ? null : await verifyTotp(seed, code, now, u.mfa.lastStep);
-  if (step !== null) { if (seed !== null && !u.mfa.secret.startsWith("v1.")) u.mfa.secret = await seal(seed, key, PURPOSE); /* upgrade legacy plaintext */ u.mfa.lastStep = step; u.mfa.failures = 0; s.mfaOk = true; db.log("mfa.verified", { userId: u.id }); return true; }
+  if (step !== null) { if (seed !== null && !u.mfa.secret.startsWith("v1.")) u.mfa.secret = await seal(seed, key, PURPOSE); u.mfa.lastStep = step; u.mfa.failures = 0; s.mfaOk = true; db.log("mfa.verified", { userId: u.id }); return true; }
   const h = await sha256Hex(code.trim().toLowerCase()), i = u.mfa.recovery.indexOf(h);
   if (i >= 0) { u.mfa.recovery.splice(i, 1); u.mfa.failures = 0; s.mfaOk = true; db.log("mfa.recovery_used", { userId: u.id, remaining: u.mfa.recovery.length }); return true; }
-  // Persistent (survives restarts and works across server instances): 5 misses in a row end this sign-in.
   u.mfa.failures = (u.mfa.failures ?? 0) + 1;
   if (u.mfa.failures >= 5) { s.revoked = true; u.mfa.failures = 0; db.log("mfa.lockout", { userId: u.id }); } else db.log("mfa.failed", { userId: u.id });
   return false;
 }
-/** Owner resets another staff member's second factor (lost phone + lost recovery codes). They must set it up again. */
 export function resetStaffMfa(db: MemoryDb, actor: Actor | null, userId: string) {
   requirePermission(actor, "staff.manage");
   const u = db.users.get(userId);
