@@ -4,6 +4,7 @@
  */
 import { STAFF_OPEN_ACCESS } from "../lib/security/open-access";
 import { resolvePortalPath } from "../lib/security/enrolment";
+import { SEED_CATEGORIES } from "../lib/domain/categories";
 import type { MemoryDb } from "./db";
 import type { Persistence } from "./persistence/transact";
 import { transact } from "./persistence/transact";
@@ -50,6 +51,13 @@ export function effectiveRate(db: MemoryDb, _env: Env) {
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff" } });
 
+function ensureCategories(db: MemoryDb) {
+  if (!db.categories?.length) {
+    db.categories = SEED_CATEGORIES.map((c) => ({ ...c }));
+  }
+  return db.categories;
+}
+
 function listAdminProducts(db: MemoryDb) {
   return [...db.products.values()].map((pr) => {
     const v = [...db.variants.values()].find((x) => x.productId === pr.id);
@@ -87,7 +95,7 @@ export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps
   }
 
   if (path === "/api/products" && req.method === "GET") return json(await transact(p, (db) => publicProducts(db)));
-  if (path === "/api/categories" && req.method === "GET") return json(await transact(p, (db) => db.categories.filter((c) => c.published)));
+  if (path === "/api/categories" && req.method === "GET") return json(await transact(p, (db) => ensureCategories(db).filter((c) => c.published)));
   if (path === "/api/site" && req.method === "GET") return json(await transact(p, (db) => db.business ?? { name: "Dera Darko Trade" }));
   if (path === "/api/rates" && req.method === "GET") return json({ displayMode: "DUAL", rate: null });
 
@@ -102,36 +110,42 @@ export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps
         return json({ id: actor.id, roles: actor.roles, mfa: "verified", mustChangePassword: false });
       }
       if (sub === "/overview" && req.method === "GET") {
-        return json(await transact(p, (db) => ({
-          products: db.products.size,
-          published: [...db.variants.values()].filter((v) => v.published).length,
-          orders: db.orders.size,
-          openTickets: [...db.tickets.values()].filter((t) => t.status === "open" || t.status === "pending").length,
-          categories: db.categories.length,
-        })));
+        return json(await transact(p, (db) => {
+          ensureCategories(db);
+          return {
+            products: db.products.size,
+            published: [...db.variants.values()].filter((v) => v.published).length,
+            orders: db.orders.size,
+            openTickets: [...db.tickets.values()].filter((t) => t.status === "open" || t.status === "pending").length,
+            categories: db.categories.length,
+          };
+        }));
       }
       if (sub === "/categories" && req.method === "GET") {
-        return json(await transact(p, (db) => db.categories));
+        return json(await transact(p, (db) => ensureCategories(db)));
       }
       if (sub === "/products" && req.method === "GET") {
         requirePermission(actor, "product.read");
         return json(await transact(p, (db) => listAdminProducts(db)));
       }
       if (sub === "/products" && req.method === "POST") {
-        const row = await transact(p, (db) => createProduct(db, actor, {
-          name: String(body.name ?? ""),
-          categoryId: String(body.categoryId ?? ""),
-          shortDescription: String(body.shortDescription ?? ""),
-          description: body.description ? String(body.description) : undefined,
-          image: String(body.image ?? "/products/placeholder.png"),
-          imageAlt: String(body.imageAlt ?? body.name ?? "Product"),
-          sku: String(body.sku ?? ""),
-          priceGhs: body.priceGhs !== undefined && body.priceGhs !== "" ? Number(body.priceGhs) : undefined,
-          priceUsd: body.priceUsd !== undefined && body.priceUsd !== "" ? Number(body.priceUsd) : undefined,
-          onHand: body.onHand !== undefined ? Number(body.onHand) : 0,
-          published: body.published === true,
-          availability: (body.availability as "available" | undefined) ?? "available",
-        }));
+        const row = await transact(p, (db) => {
+          ensureCategories(db);
+          return createProduct(db, actor, {
+            name: String(body.name ?? ""),
+            categoryId: String(body.categoryId ?? ""),
+            shortDescription: String(body.shortDescription ?? ""),
+            description: body.description ? String(body.description) : undefined,
+            image: String(body.image ?? "/products/placeholder.png"),
+            imageAlt: String(body.imageAlt ?? body.name ?? "Product"),
+            sku: String(body.sku ?? ""),
+            priceGhs: body.priceGhs !== undefined && body.priceGhs !== "" ? Number(body.priceGhs) : undefined,
+            priceUsd: body.priceUsd !== undefined && body.priceUsd !== "" ? Number(body.priceUsd) : undefined,
+            onHand: body.onHand !== undefined ? Number(body.onHand) : 0,
+            published: body.published === true,
+            availability: (body.availability as "available" | undefined) ?? "available",
+          });
+        });
         return json({ id: row.id, slug: row.slug });
       }
       if (sub === "/products/publish" && req.method === "POST") {
@@ -140,6 +154,7 @@ export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps
       }
       if (sub === "/products/seed" && req.method === "POST") {
         const created = await transact(p, (db) => {
+          ensureCategories(db);
           const out: { name: string; sku: string }[] = [];
           for (const s of SAMPLE_SEED) {
             if ([...db.variants.values()].some((v) => v.id.split("::")[1] === s.sku)) continue;
