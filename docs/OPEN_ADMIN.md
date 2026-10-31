@@ -1,36 +1,28 @@
-# Temporary open admin access
+# Temporary open admin access (NO LOGIN)
 
-**Status: ON** (`STAFF_OPEN_ACCESS = true` in `src/lib/security/open-access.ts`).
+**Status: ON** — `STAFF_OPEN_ACCESS = true` in `src/lib/security/open-access.ts`.
 
-## Portal URL
+## Open the dashboard
 
-While open access is on and `ADMIN_PORTAL_PATH` is unset, the owner console is at:
+Go to:
 
 **`/dera-owner-console`**
 
-Example: `https://your-site.example/dera-owner-console`
+Example: `https://your-domain/dera-owner-console`
 
-## First-time enrolment
+There is **no sign-in, password, email verification, or MFA**. Opening the URL is enough.
 
-1. Open the portal URL above.
-2. Enrol with:
-   - **Email** — your owner email
-   - **Reference** — any text (ignored while open access is on)
-   - **Password** — optional; blank is allowed
-3. Sign in with that email (password optional).
-4. No email verification or MFA is required.
+The API auto-creates an owner actor (`owner@open.local`) on first request.
 
-You do **not** need `ADMIN_BOOTSTRAP_REF_HASH`, `SESSION_SECRET`, or D1 for this temporary mode. Without D1 the shop uses **in-memory** storage (data resets when the Worker restarts). For lasting data, create D1 + secrets as in `docs/DEPLOYMENT.md`.
+## Notes
 
-## If you still see errors
-
-| Message | Meaning |
-|--------|--------|
-| Enrolment unavailable / details rejected | An owner may already exist, or setup was closed. Clear the D1 `app_state` (or wait for a memory reset) and try once. |
-| Service not configured | Old deploy without open-access server fallback — pull latest `main` and redeploy. |
+- Without Cloudflare D1, data is **in-memory** and resets when the Worker restarts.
+- Some advanced admin API routes are simplified while open access is on; core product/catalogue management works.
+- **Customer** checkout and accounts are separate; this only unlocks the staff portal.
 
 ## Lock down for production
 
 1. Set `STAFF_OPEN_ACCESS = false` in `src/lib/security/open-access.ts`.
-2. Configure D1, `SESSION_SECRET`, `SITE_ORIGIN`, `ADMIN_BOOTSTRAP_REF_HASH`, `ADMIN_PORTAL_PATH`.
-3. Redeploy and complete real enrolment with MFA.
+2. Restore full `src/server/api.ts` from git history before the open-access simplification (or re-apply the complete API).
+3. Configure D1, `SESSION_SECRET`, `SITE_ORIGIN`, `ADMIN_BOOTSTRAP_REF_HASH`, `ADMIN_PORTAL_PATH`.
+4. Redeploy and enrol with real MFA.
