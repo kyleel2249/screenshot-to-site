@@ -32,7 +32,13 @@ function Checkout() {
   const [terms, setTerms] = useState(false); const [pre, setPre] = useState(false);
   const [errors, setErrors] = useState<string[]>([]); const [busy, setBusy] = useState(false); const [placed, setPlaced] = useState<Placed | null>(null);
 
-  useEffect(() => { void api.zones().then((r) => setZones(r.ok ? r.data : [])); void api.me().then((r) => setSignedIn(r.ok)); }, []);
+  const [saved, setSaved] = useState<{ id: string; recipient: string; region: string; city: string; street: string; isDefault: boolean }[]>([]);
+  useEffect(() => { void api.zones().then((r) => setZones(r.ok ? r.data : [])); void api.me().then((r) => { setSignedIn(r.ok); if (r.ok) void api.addresses().then((a) => { if (a.ok) setSaved(a.data ?? []); }); }); }, []);
+  const useSaved = (id: string) => {
+    const a = saved.find((x) => x.id === id); if (!a) return;
+    setF((v) => ({ ...v, recipient: a.recipient, city: a.city, street: a.street }));
+    const z = zones?.find((zz) => zz.regions.includes(a.region)); if (z) { setZoneId(z.id); setRegion(a.region); }
+  };
   const zone = zones?.find((z) => z.id === zoneId);
   const hasPre = q.ok && q.hasPreorder;
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value });
@@ -93,6 +99,15 @@ function Checkout() {
               <label htmlFor="region" className="mb-1 block text-sm font-medium">Region</label>
               <select id="region" className={inputCls} required value={region} onChange={(e) => setRegion(e.target.value)}>
                 <option value="" disabled>Choose…</option>{zone.regions.map((r) => <option key={r}>{r}</option>)}
+              </select>
+            </div>
+          )}
+          {saved.length > 0 && (
+            <div className="sm:col-span-2">
+              <label htmlFor="saved-address" className="mb-1 block text-sm font-medium">Use a saved address</label>
+              <select id="saved-address" className={inputCls} defaultValue="" onChange={(e) => useSaved(e.target.value)}>
+                <option value="">Enter a new address…</option>
+                {saved.map((a) => <option key={a.id} value={a.id}>{a.recipient} — {a.street}, {a.city}{a.isDefault ? " (default)" : ""}</option>)}
               </select>
             </div>
           )}
