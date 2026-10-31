@@ -4,20 +4,6 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/*
- * Design system definition.
- *
- * The @theme inline block maps CSS custom properties to Tailwind utility
- * classes (e.g. --color-primary -> bg-primary, text-primary).
- *
- * The :root and .dark blocks define the actual color values using oklch.
- * All colors MUST use oklch format.
- *
- * To add a new semantic color:
- * 1. Add the variable to :root (light value) and .dark (dark value)
- * 2. Register it in @theme inline as --color-<name>: var(--<name>)
- */
-
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -70,8 +56,6 @@
   --color-navy-2: var(--navy-2);
 }
 
-/* Official brand tokens (single source of truth for hex values; semantic oklch tokens below are derived equivalents).
-   NO GREEN is used anywhere in this theme. */
 :root {
   --brand-navy: #071D49;
   --brand-gold: #F5B900;
@@ -141,6 +125,56 @@
 @utility btn-primary { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; border-radius: 9999px; background: var(--gradient-gold); color: var(--color-gold-foreground); font-weight: 600; font-size: .875rem; padding: .75rem 1.5rem; transition: transform 250ms ease, box-shadow 250ms ease; &:hover { transform: translateY(-1px); box-shadow: 0 8px 20px -8px var(--color-gold-dark); } }
 @utility btn-secondary { display: inline-flex; align-items: center; justify-content: center; border-radius: 9999px; background: var(--color-primary); color: var(--color-primary-foreground); font-weight: 500; font-size: .875rem; padding: .6rem 1.25rem; transition: background 250ms ease; &:hover { background: var(--color-navy-2); } }
 @utility badge-preorder { border-radius: 9999px; background: var(--color-primary); color: var(--color-gold); font-size: .7rem; font-weight: 600; padding: .2rem .6rem; letter-spacing: .04em; text-transform: uppercase; }
-
-
 @utility badge-label { border-radius: 9999px; background: var(--brand-gold); color: var(--brand-navy); font-size: .7rem; font-weight: 600; padding: .2rem .6rem; letter-spacing: .04em; text-transform: uppercase; }
+
+/* —— Shop product cards: responsive 3D stage —— */
+.product-card-3d {
+  transform-style: preserve-3d;
+  transition: transform 320ms ease, box-shadow 320ms ease;
+  will-change: transform;
+}
+.product-card-3d:hover {
+  transform: translateY(-6px) rotateX(4deg) rotateY(-3deg);
+  box-shadow:
+    0 4px 8px oklch(0.24 0.09 264 / 8%),
+    0 18px 40px -16px oklch(0.24 0.09 264 / 28%),
+    0 0 0 1px oklch(0.82 0.17 84 / 25%);
+}
+.product-card-3d-stage {
+  perspective: 900px;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 40%, oklch(1 0 0) 0%, transparent 70%),
+    linear-gradient(165deg, oklch(0.98 0.01 84) 0%, oklch(0.94 0.012 264) 45%, oklch(0.91 0.02 264) 100%);
+}
+.product-card-3d-plate {
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: 8%;
+  height: 18%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, oklch(0.24 0.09 264 / 18%) 0%, transparent 70%);
+  filter: blur(6px);
+  transform: translateZ(-20px);
+  pointer-events: none;
+}
+.product-card-3d-img {
+  transform: translateZ(24px) scale(0.96);
+  filter: drop-shadow(0 12px 18px oklch(0.24 0.09 264 / 22%));
+  transition: transform 400ms ease, filter 400ms ease;
+}
+.product-card-3d:hover .product-card-3d-img {
+  transform: translateZ(40px) scale(1.04);
+  filter: drop-shadow(0 18px 28px oklch(0.24 0.09 264 / 28%));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .product-card-3d,
+  .product-card-3d:hover,
+  .product-card-3d-img,
+  .product-card-3d:hover .product-card-3d-img {
+    transform: none;
+    filter: none;
+    transition: none;
+  }
+}
