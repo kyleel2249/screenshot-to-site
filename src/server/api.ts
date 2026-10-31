@@ -43,11 +43,11 @@ export interface Env {
 export type NoticeTemplate = "order_received" | "order_update" | "payment_received" | "quote_ready" | "ticket_reply";
 export interface Deps {
   /** Payment provider; defaults to the one configured by PAYMENT_PROVIDER / PAYMENT_SECRET_KEY. Injectable for tests. */
-  payments?: PaymentProvider;
+  payments?: PaymentProvider | undefined;
   /** Informational notices. Carry a reference and a subject line only — never tokens, secrets or message bodies. */
-  notify?: (to: string, template: NoticeTemplate, data: { ref: string; subject?: string }) => Promise<void>;
+  notify?: ((to: string, template: NoticeTemplate, data: { ref: string; subject?: string }) => Promise<void>) | undefined;
   /** Outbound email. Tokens are only ever delivered here, never returned in an HTTP response. */
-  mail?: (to: string, template: "verify_email" | "password_reset" | "owner_verify" | "staff_invite", data: { token: string }) => Promise<void>;
+  mail?: ((to: string, template: "verify_email" | "password_reset" | "owner_verify" | "staff_invite", data: { token: string }) => Promise<void>) | undefined;
 }
 type Body = Record<string, unknown>;
 
