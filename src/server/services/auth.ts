@@ -37,11 +37,22 @@ export async function verifyEmail(db: MemoryDb, token: string, now = Date.now())
   u.emailVerified = true; db.log("email.verified", { userId: u.id }); return true;
 }
 
-export async function login(db: MemoryDb, i: { email: string; password: string; secret: string; now?: number }) {
+export async function login(db: MemoryDb, i: { email: string; password: string; secret: string; now?: number; /** TEMP: staff sign-in without password/MFA/email verify when DEV_OPEN_ADMIN is set. */ openAdmin?: boolean }) {
   const now = i.now ?? Date.now();
+  const openAdmin = i.openAdmin === true;
   const u = byEmail(db, i.email);
-  if (!u || u.status !== "active") { await verifyPassword(i.password, "pbkdf2-sha256$1000$AAAA$AAAA"); return { ok: false as const, error: GENERIC_LOGIN_ERROR }; }
-  if (u.lockedUntil > now) return { ok: false as const, error: "Too many attempts. Try again later." };
+  if (!u || u.status !== "active") { await verifyPassword(i.password || "x", "pbkdf2-sha256$1000$AAAA$AAAA"); return { ok: false as const, error: GENERIC_LOGIN_ERROR }; }
+  if (u.lockedUntil > now && !(openAdmin && u.kind === "staff")) return { ok: false as const, error: "Too many attempts. Try again later." };
+  // TEMP open-admin mode: staff may sign in with any password (including blank) and skip email verification.
+  if (openAdmin && u.kind === "staff") {
+    u.emailVerified = true;
+    u.failedLogins = 0;
+    u.lockedUntil = 0;
+    const sid = db.nextId("ses");
+    db.sessions.set(sid, { id: sid, userId: u.id, expiresAt: now + SESSION_MS, revoked: false, authAt: now, mfaOk: true });
+    db.log("login.success_open_admin", { userId: u.id });
+    return { ok: true as const, token: await signSession({ sid, sub: u.id, exp: now + SESSION_MS }, i.secret), authAt: now };
+  }
   if (!(await verifyPassword(i.password, u.passwordHash))) {
     u.failedLogins++;
     if (u.failedLogins >= MAX_FAILS) { u.lockedUntil = now + LOCK_MS; u.failedLogins = 0; db.log("login.locked", { userId: u.id }); }
@@ -56,18 +67,23 @@ export async function login(db: MemoryDb, i: { email: string; password: string; 
   return { ok: true as const, token: await signSession({ sid, sub: u.id, exp: now + SESSION_MS }, i.secret), authAt: now };
 }
 
-export async function authenticate(db: MemoryDb, token: string | undefined, secret: string, _unused?: number, now = Date.now()): Promise<Actor | null> {
+export async function authenticate(db: MemoryDb, token: string | undefined, secret: string, _unused?: number, now = Date.now(), openAdmin = false): Promise<Actor | null> {
   void _unused;
   if (!token) return null;
   const p = await verifySession(token, secret, now); if (!p) return null;
   const s = db.sessions.get(p.sid); const u = db.users.get(p.sub);
   if (!s || s.revoked || s.expiresAt < now || !u || u.status !== "active" || s.userId !== u.id) return null;
-  return { id: u.id, kind: u.kind, roles: u.roles, recentAuthAt: s.authAt, mfaOk: u.kind !== "staff" || s.mfaOk === true }; // derived from the server-side session, never from the client
+  // TEMP: open-admin treats staff sessions as MFA-complete.
+  if (openAdmin && u.kind === "staff") s.mfaOk = true;
+  return { id: u.id, kind: u.kind, roles: u.roles, recentAuthAt: s.authAt, mfaOk: u.kind !== "staff" || s.mfaOk === true || openAdmin }; // derived from the server-side session, never from the client
 }
 /** Step-up: re-verify the password to refresh the session's recent-authentication time (needed for refunds/exports). */
-export async function reauthenticate(db: MemoryDb, sid: string, password: string, now = Date.now()) {
+export async function reauthenticate(db: MemoryDb, sid: string, password: string, now = Date.now(), openAdmin = false) {
   const s = db.sessions.get(sid); const u = s && db.users.get(s.userId);
-  if (!s || !u || !(await verifyPassword(password, u.passwordHash))) return false;
+  if (!s || !u) return false;
+  // TEMP: open-admin mode skips password step-up for staff.
+  if (openAdmin && u.kind === "staff") { s.authAt = now; db.log("reauth.success_open_admin", { userId: u.id }); return true; }
+  if (!(await verifyPassword(password, u.passwordHash))) return false;
   s.authAt = now; db.log("reauth.success", { userId: u.id }); return true;
 }
 export const logout = (db: MemoryDb, sid: string) => { const s = db.sessions.get(sid); if (s) s.revoked = true; };
