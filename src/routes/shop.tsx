@@ -232,7 +232,7 @@ function Shop() {
   );
 
   return (
-    <div className="bg-cloud min-h-[60vh]">
+    <div className="bg-secondary/40 min-h-[60vh]">
       <div className="container-x py-8 md:py-10">
         {crumbs.length > 0 && (
           <nav aria-label="Breadcrumb" className="mb-4 text-sm text-muted-foreground">
@@ -251,10 +251,8 @@ function Shop() {
         )}
 
         <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
-          {/* Desktop sidebar */}
           <div className="hidden w-64 shrink-0 lg:block">{Sidebar}</div>
 
-          {/* Main collection */}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-4">
               <div>
@@ -336,11 +334,7 @@ function Shop() {
                 </div>
                 {hasMore && (
                   <div className="mt-10 flex justify-center">
-                    <button
-                      type="button"
-                      className="btn-primary"
-                      onClick={() => setSearch({ page: safePage + 1 })}
-                    >
+                    <button type="button" className="btn-primary" onClick={() => setSearch({ page: safePage + 1 })}>
                       Load more products
                     </button>
                   </div>
@@ -351,7 +345,6 @@ function Shop() {
         </div>
       </div>
 
-      {/* Mobile filter drawer */}
       <Sheet open={filterOpen} onOpenChange={setFilterOpen}>
         <SheetContent side="left" className="w-[85vw] max-w-sm overflow-y-auto bg-background p-5">
           <SheetHeader className="text-left">
