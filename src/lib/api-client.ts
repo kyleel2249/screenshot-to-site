@@ -135,7 +135,7 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
       productMedia: (productId: string) => get<{ primary: { url: string; alt: string }; items: ProductMedia[] }>(`${portal}/api/products/media?productId=${encodeURIComponent(productId)}`),
       addProductMedia: (b: { productId: string; url: string; alt: string; kind: "verified" | "illustrative"; caption?: string; canvaDesignId?: string }) => post<ProductMedia>(`${portal}/api/products/media`, b),
       reviewProductMedia: (b: { productId: string; imageId: string; action: "approve" | "reject" | "make_primary" }) => post<ProductMedia>(`${portal}/api/products/media/review`, b),
-      exchangeRate: () => get<{ rate: { ghsPerUsdMicro: number; source: string; effectiveDate: string; approvedBy: string; approvedAt: number } | null; displayMode: DisplayModeSetting; ageDays?: number; stale?: boolean }>(`${portal}/api/exchange-rate`),
+      exchangeRate: () => get<{ fromConfig?: boolean; rate: { ghsPerUsdMicro: number; source: string; effectiveDate: string; approvedBy: string; approvedAt: number } | null; displayMode: DisplayModeSetting; ageDays?: number; stale?: boolean }>(`${portal}/api/exchange-rate`),
       saveExchangeRate: (b: { ghsPerUsd?: string; source?: string; effectiveDate?: string; displayMode?: DisplayModeSetting; clear?: boolean }) => post(`${portal}/api/exchange-rate`, b),
       overview: () => get<Overview>(`${portal}/api/overview`),
       business: () => get<BusinessInfo>(`${portal}/api/business`),

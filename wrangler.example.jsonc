@@ -5,7 +5,10 @@
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
-    "SITE_ORIGIN": "https://your-domain.example"
+    "SITE_ORIGIN": "https://your-domain.example",
+    "EXCHANGE_RATE_GHS_PER_USD": "11.47",
+    "EXCHANGE_RATE_SOURCE": "Owner-set rate",
+    "EXCHANGE_RATE_DATE": "2026-10-31"
   },
   "d1_databases": [
     { "binding": "DB", "database_name": "dera-darko-trade", "database_id": "<paste the id printed by `wrangler d1 create`>" }

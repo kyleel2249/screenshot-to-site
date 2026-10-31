@@ -9,7 +9,7 @@ export function ProductGallery({ p }: { p: Pick<StoreProduct, "image" | "imageAl
   return (
     <div>
       <img src={cur.url} alt={cur.alt} width={816} height={816} className="w-full rounded-2xl border border-border object-cover" />
-      {cur.illustrative && <p className="mt-2 text-xs text-muted-foreground">Illustrative image — the item you receive may look slightly different.</p>}
+      <p className="mt-2 text-xs text-muted-foreground">Images are for illustration. Colour and finish may vary slightly.</p>
       {all.length > 1 && (
         <ul className="mt-3 flex flex-wrap gap-2" aria-label="More images">
           {all.map((g, n) => (

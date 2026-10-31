@@ -21,8 +21,10 @@ type Placed = { order: ApiOrder; trackingSecret?: string; paymentAvailable: bool
 function Checkout() {
   const { lines, clear } = useCart();
   const { mode } = useCurrency();
-  const currency = mode === "USD" ? "USD" : "GHS";
   const { products } = useCatalog();
+  // Charge in US dollars only when the owner priced every item in dollars; otherwise payment is in cedis (shown plainly below).
+  const allUsd = lines.length > 0 && lines.every((l) => { const pr = products.find((x) => x.variantId === l.variantId); return pr ? (pr.salePrice ?? pr.price).USD !== undefined : false; });
+  const currency = mode === "USD" && allUsd ? "USD" : "GHS";
   const q = estimate(lines, products, currency);
   const key = useRef(newIdempotencyKey());
   const [zones, setZones] = useState<Zone[] | null>(null);
@@ -119,6 +121,7 @@ function Checkout() {
         </div>
         <aside className="card-elevated h-fit p-6 text-sm">
           <h2 className="font-display text-lg font-bold">Summary ({currency})</h2>
+          <p className="mt-1 text-xs text-muted-foreground">{currency === "GHS" ? "You will pay in Ghana cedis (GH₵)." : "You will pay in US dollars ($)."}</p>
           {q.ok ? (
             <dl className="mt-3 space-y-2">
               <div className="flex justify-between"><dt>Subtotal</dt><dd>{formatMoney(q.subtotal)}</dd></div>

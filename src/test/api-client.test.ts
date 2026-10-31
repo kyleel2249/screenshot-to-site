@@ -1001,3 +1001,29 @@ describe("product image provenance and approval", () => {
     expect((await mk().admin(PORTAL).addProductMedia({ productId: id, url: "https://cdn.example/a.webp", alt: "a", kind: "verified" })).ok).toBe(false);
   });
 });
+
+describe("exchange rate from deployment settings", () => {
+  test("is used when the owner hasn't saved one in the dashboard, and a saved one overrides it", async () => {
+    const cfg = { EXCHANGE_RATE_GHS_PER_USD: "11.47", EXCHANGE_RATE_SOURCE: "Owner-set rate", EXCHANGE_RATE_DATE: "2026-10-31" };
+    const { mk, admin } = await shop(undefined, cfg);
+    expect((await mk().rates()).data!.rate).toEqual({ ghsPerUsdMicro: 11_470_000, source: "Owner-set rate", effectiveDate: "2026-10-31" });
+    expect((await admin.exchangeRate()).data!.fromConfig).toBe(true);
+    const bad = await shop(undefined, { EXCHANGE_RATE_GHS_PER_USD: "abc", EXCHANGE_RATE_DATE: "2026-10-31" });
+    expect((await bad.mk().rates()).data!.rate).toBeNull();
+  });
+});
+
+describe("starter catalogue file", () => {
+  test("imports cleanly through the real importer, as unpublished price-pending items; they can't be published until priced", async () => {
+    const { readFileSync, existsSync } = await import("node:fs");
+    const csv = readFileSync(new URL("../../data/catalogue-seed.csv", import.meta.url), "utf8");
+    const { admin, mk } = await shop();
+    const check = await admin.importProducts(csv, true); expect(check.ok).toBe(true); expect(check.data!.count).toBeGreaterThan(80);
+    expect((await admin.importProducts(csv, false)).ok).toBe(true);
+    expect((await mk().products()).data!.some((p) => p.name === "Classic White Sneakers")).toBe(false); // nothing public yet
+    const list = (await admin.products()).data!; const sneaker = list.find((p) => p.name === "Classic White Sneakers")!;
+    expect(sneaker.published).toBe(false); expect(sneaker.availability).toBe("coming_soon"); expect(sneaker.price).toEqual({});
+    expect((await admin.publish(sneaker.id, true)).ok).toBe(false); // no approved price yet
+    for (const line of csv.trim().split("\n").slice(1)) { const img = /,(\/products\/DDT-\d+\.png),/.exec(line)![1]!; expect(existsSync(new URL(`../../public${img}`, import.meta.url))).toBe(true); }
+  });
+});

@@ -25,7 +25,7 @@ export function importProducts(db: MemoryDb, actor: Actor | null, csv: unknown, 
   if (!rows.length) throw new ValidationError(["The file has a header row but no products."]);
   if (rows.length > IMPORT_MAX_ROWS) throw new ValidationError([`Too many rows (${IMPORT_MAX_ROWS} maximum per file).`]);
   for (const need of ["name", "sku", "category", "short_description", "image", "image_alt"]) if (!header.includes(need)) throw new ValidationError([`The header row must include a "${need}" column.`]);
-  if (!header.includes("price_ghs") && !header.includes("price_usd")) throw new ValidationError(['Include a "price_ghs" and/or "price_usd" column.']);
+  if (!header.includes("price_ghs") && !header.includes("price_usd")) throw new ValidationError(['Include a "price_ghs" and/or "price_usd" column (cells may be left empty for items whose price is still pending; those stay unpublished).']);
   const col = (r: string[], k: string) => { const i = header.indexOf(k); return i < 0 ? "" : (r[i] ?? "").trim(); };
   const catByKey = new Map<string, string>();
   for (const c of db.categories) { catByKey.set(c.id.toLowerCase(), c.id); catByKey.set(c.slug.toLowerCase(), c.id); }

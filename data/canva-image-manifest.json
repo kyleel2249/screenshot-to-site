@@ -1,0 +1,56 @@
+{
+  "generatedAt": "2026-10-31",
+  "creditsExhausted": true,
+  "items": [
+    {
+      "sku": "DDT-029",
+      "name": "Classic White Sneakers",
+      "canvaMediaId": "MAHZmgrCBeA",
+      "targetCanvaFolderId": "FAHZmW1FAsk",
+      "kind": "illustrative",
+      "status": "generated_in_canva_awaiting_export",
+      "siteFile": "public/products/DDT-029.png",
+      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+    },
+    {
+      "sku": "DDT-010",
+      "name": "Leather-Look Tote Bag",
+      "canvaMediaId": "MAHZmsM74jM",
+      "targetCanvaFolderId": "FAHZmanHmGw",
+      "kind": "illustrative",
+      "status": "generated_in_canva_awaiting_export",
+      "siteFile": "public/products/DDT-010.png",
+      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+    },
+    {
+      "sku": "DDT-054",
+      "name": "Everyday Backpack",
+      "canvaMediaId": "MAHZmuROYX8",
+      "targetCanvaFolderId": "FAHZmQeN8bU",
+      "kind": "illustrative",
+      "status": "generated_in_canva_awaiting_export",
+      "siteFile": "public/products/DDT-054.png",
+      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+    },
+    {
+      "sku": "DDT-037",
+      "name": "Portable Power Bank",
+      "canvaMediaId": "MAHZmkWtDYg",
+      "targetCanvaFolderId": "FAHZmee15z8",
+      "kind": "illustrative",
+      "status": "generated_in_canva_awaiting_export",
+      "siteFile": "public/products/DDT-037.png",
+      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+    },
+    {
+      "sku": "DDT-038",
+      "name": "Smart Watch",
+      "canvaMediaId": "MAHZmtjmXpA",
+      "targetCanvaFolderId": "FAHZmee15z8",
+      "kind": "illustrative",
+      "status": "generated_in_canva_awaiting_export",
+      "siteFile": "public/products/DDT-038.png",
+      "note": "Placeholder tile is live on the site until the exported image replaces the file."
+    }
+  ]
+}

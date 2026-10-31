@@ -19,7 +19,8 @@ export function createProduct(db: MemoryDb, actor: Actor | null, input: NewProdu
   const errors: string[] = [];
   if (!input.name.trim()) errors.push("Name is required.");
   if (!db.categories.some((c) => c.id === input.categoryId)) errors.push("Unknown category.");
-  if (input.priceGhs === undefined && input.priceUsd === undefined) errors.push("Set a price in at least one currency.");
+  // A product with no price yet is allowed only as an unpublished draft ("price pending"); it can't be published until a price is approved.
+  if (input.priceGhs === undefined && input.priceUsd === undefined && input.published) errors.push("Set a price in at least one currency before publishing.");
   for (const [k, v] of [["GHS price", input.priceGhs], ["USD price", input.priceUsd], ["stock", input.onHand]] as const) if (v !== undefined && !isMinor(v)) errors.push(`${k} must be a non-negative whole number of minor units.`);
   if ([...db.variants.values()].some((v) => v.id.split("::")[1] === input.sku)) errors.push("SKU already exists.");
   if (input.availability === "pre_order" && !input.preOrderEnabled) errors.push("Enable pre-orders explicitly to use the Pre-order status.");
@@ -76,6 +77,7 @@ export function setAvailability(db: MemoryDb, actor: Actor | null, productIds: s
 export function setPublishedState(db: MemoryDb, actor: Actor | null, productId: string, published: boolean) {
   requirePermission(actor, "product.write");
   if (!db.products.has(productId)) throw new ValidationError(["Unknown product."]);
+  if (published && variantsOf(db, productId).some((v) => v.price.GHS === undefined && v.price.USD === undefined)) throw new ValidationError(["This product has no approved price yet. Set a price before publishing."]);
   for (const v of variantsOf(db, productId)) v.published = published;
   db.log(published ? "product.published" : "product.unpublished", { productId }, actor.id);
 }

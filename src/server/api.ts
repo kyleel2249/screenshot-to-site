@@ -41,7 +41,7 @@ import type { Availability } from "../lib/domain/status";
 
 export interface Env {
   SESSION_SECRET: string; SITE_ORIGIN: string; ADMIN_BOOTSTRAP_REF_HASH?: string; ADMIN_PORTAL_PATH?: string;
-  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string; DATA_ENCRYPTION_KEY?: string; CSP_MODE?: string; MAINTENANCE_KEY?: string; MEDIA?: R2Like;
+  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string; DATA_ENCRYPTION_KEY?: string; CSP_MODE?: string; MAINTENANCE_KEY?: string; MEDIA?: R2Like; EXCHANGE_RATE_GHS_PER_USD?: string; EXCHANGE_RATE_SOURCE?: string; EXCHANGE_RATE_DATE?: string;
 }
 export type NoticeTemplate = "order_received" | "order_update" | "payment_received" | "quote_ready" | "ticket_reply";
 export interface Deps {
@@ -86,6 +86,14 @@ const orderView = (o: { id: string; ref: string; status: string; currency: strin
   ({ id: o.id, ref: o.ref, status: o.status, currency: o.currency, subtotal: o.subtotal, discount: o.discount, shipping: o.shipping, total: o.total, hasPreorder: o.hasPreorder, createdAt: o.createdAt, payBy: o.status === "pending_payment" && (o.reservedUntil ?? 0) > Date.now() ? o.reservedUntil : null, paymentMethod: o.paymentMethod ?? null, items: o.items.map((i) => ({ name: i.name, qty: i.qty, unit: i.unit, line: i.line, mode: i.mode })), history: o.history.map((h) => ({ to: h.to, at: h.at })) });
 
 /** Public catalogue straight from the database: never exposes costs, exact stock (unless limited-stock display is on), or unpublished items. */
+/** The approved rate: one saved in the dashboard wins; otherwise the owner's deployment setting (EXCHANGE_RATE_*), if valid. Never invented. */
+export function effectiveRate(db: MemoryDb, env: Env) {
+  if (db.exchangeRate) return { rate: db.exchangeRate, fromConfig: false };
+  if (!env.EXCHANGE_RATE_GHS_PER_USD) return { rate: null, fromConfig: false };
+  const c = cleanRate({ ghsPerUsd: env.EXCHANGE_RATE_GHS_PER_USD, source: env.EXCHANGE_RATE_SOURCE ?? "Owner-set rate", effectiveDate: env.EXCHANGE_RATE_DATE ?? "" }, Date.now(), "deployment-config");
+  return c.ok ? { rate: c.rate, fromConfig: true } : { rate: null, fromConfig: false };
+}
+
 export function publicProducts(db: MemoryDb, now = new Date()) {
   const out = [];
   for (const p of db.products.values()) {
@@ -271,7 +279,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         if (sub === "/business" && req.method === "GET") { requirePermission(actor, "settings.write"); return json(await transact(p, (db) => db.business)); }
         if (sub === "/exchange-rate" && req.method === "GET") {
           requirePermission(actor, "settings.write");
-          return json(await transact(p, (db) => ({ rate: db.exchangeRate ?? null, displayMode: db.settings["displayMode"] ?? "DUAL", ...(db.exchangeRate ? { ageDays: rateAgeDays(db.exchangeRate, Date.now()), stale: isStale(db.exchangeRate, Date.now()) } : {}) })));
+          return json(await transact(p, (db) => { const { rate, fromConfig } = effectiveRate(db, env); return { rate, fromConfig, displayMode: db.settings["displayMode"] ?? "DUAL", ...(rate ? { ageDays: rateAgeDays(rate, Date.now()), stale: isStale(rate, Date.now()) } : {}) }; }));
         }
         if (sub === "/exchange-rate" && req.method === "POST") {
           requirePermission(actor, "settings.write");
@@ -413,7 +421,7 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
     ];
     if (path === "/api/rates" && req.method === "GET") {
       // Public: only what the storefront needs to show converted prices honestly (rate, where it came from, and how old it is).
-      return json(await transact(p, (db) => ({ displayMode: db.settings["displayMode"] ?? "DUAL", rate: db.exchangeRate ? { ghsPerUsdMicro: db.exchangeRate.ghsPerUsdMicro, source: db.exchangeRate.source, effectiveDate: db.exchangeRate.effectiveDate } : null })), 200, { "Cache-Control": "public, max-age=60" });
+      return json(await transact(p, (db) => { const { rate } = effectiveRate(db, env); return { displayMode: db.settings["displayMode"] ?? "DUAL", rate: rate ? { ghsPerUsdMicro: rate.ghsPerUsdMicro, source: rate.source, effectiveDate: rate.effectiveDate } : null }; }), 200, { "Cache-Control": "public, max-age=60" });
     }
     if (path === "/api/site" && req.method === "GET") return json(await transact(p, (db) => db.business), 200, { "Cache-Control": "public, max-age=300" });
     if (path === "/api/payments/config" && req.method === "GET") {
