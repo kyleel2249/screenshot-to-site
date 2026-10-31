@@ -1,6 +1,7 @@
 /**
  * Two-step verification for STAFF (authenticator-app TOTP + one-time recovery codes).
  * A staff session starts with `mfaOk=false` and can only reach the /mfa endpoints until a code is proven.
+ * TEMP: when openAdmin is true (DEV_OPEN_ADMIN), MFA is treated as already verified.
  */
 import { randomToken, sha256Hex } from "../../lib/security/crypto";
 import { newTotpSecret, otpauthUri, verifyTotp } from "../../lib/security/totp";
@@ -10,7 +11,9 @@ import { requirePermission, type Actor } from "../rbac";
 import { ValidationError } from "./catalog-admin";
 
 export type MfaState = "setup_required" | "code_required" | "verified";
-export function mfaState(db: MemoryDb, actor: Actor, sid: string): MfaState {
+export function mfaState(db: MemoryDb, actor: Actor, sid: string, openAdmin = false): MfaState {
+  // TEMP: DEV_OPEN_ADMIN treats staff MFA as already verified.
+  if (openAdmin && actor.kind === "staff") return "verified";
   const u = db.users.get(actor.id);
   if (db.sessions.get(sid)?.mfaOk) return "verified";
   return u?.mfa?.confirmed ? "code_required" : "setup_required";
