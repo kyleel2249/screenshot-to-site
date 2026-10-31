@@ -63,17 +63,16 @@ function listAdminProducts(db: MemoryDb) {
   });
 }
 
-/** Sample catalogue rows so the dashboard is not empty. */
 const SAMPLE_SEED: {
   name: string; sku: string; categoryId: string; shortDescription: string; image: string; imageAlt: string;
   priceGhs?: number; priceUsd?: number; onHand: number; published: boolean;
 }[] = [
   { name: "Laundry Basket", sku: "DDT-003", categoryId: "cat-household-and-kitchen--household-items", shortDescription: "Sturdy laundry basket for home use.", image: "/products/DDT-003.png", imageAlt: "Laundry Basket", priceGhs: 8500, priceUsd: 800, onHand: 25, published: true },
   { name: "Storage Container Set", sku: "DDT-004", categoryId: "cat-household-and-kitchen--household-items", shortDescription: "Set of storage containers.", image: "/products/DDT-004.png", imageAlt: "Storage Container Set", priceGhs: 12000, priceUsd: 1100, onHand: 40, published: true },
-  { name: "Cotton T-Shirt", sku: "DDT-010", categoryId: "cat-clothing-and-fashion--t-shirts", shortDescription: "Everyday cotton t-shirt.", image: "/products/DDT-010.png", imageAlt: "Cotton T-Shirt", priceGhs: 4500, priceUsd: 400, onHand: 100, published: true },
+  { name: "Cotton T-Shirt", sku: "DDT-010", categoryId: "cat-clothing-and-fashion--mens-clothes", shortDescription: "Everyday cotton t-shirt.", image: "/products/DDT-010.png", imageAlt: "Cotton T-Shirt", priceGhs: 4500, priceUsd: 400, onHand: 100, published: true },
   { name: "School Backpack", sku: "DDT-020", categoryId: "cat-bags-and-luggage--school-bags", shortDescription: "Durable school backpack.", image: "/products/DDT-020.png", imageAlt: "School Backpack", priceGhs: 15000, priceUsd: 1400, onHand: 30, published: true },
   { name: "Phone Power Bank", sku: "DDT-030", categoryId: "cat-phones-and-accessories--power-banks", shortDescription: "Portable power bank.", image: "/products/DDT-030.png", imageAlt: "Phone Power Bank", priceGhs: 18000, priceUsd: 1600, onHand: 50, published: true },
-  { name: "Leather Belt", sku: "DDT-040", categoryId: "cat-clothing-and-fashion--accessories", shortDescription: "Classic leather belt.", image: "/products/DDT-040.png", imageAlt: "Leather Belt", priceGhs: 7500, priceUsd: 700, onHand: 20, published: true },
+  { name: "Leather Belt", sku: "DDT-040", categoryId: "cat-clothing-and-fashion--mens-clothes", shortDescription: "Classic leather belt.", image: "/products/DDT-040.png", imageAlt: "Leather Belt", priceGhs: 7500, priceUsd: 700, onHand: 20, published: true },
   { name: "Hair Extension Pack", sku: "DDT-050", categoryId: "cat-hair-and-hair-accessories--hair-extensions", shortDescription: "Hair extension pack.", image: "/products/DDT-050.png", imageAlt: "Hair Extension Pack", priceGhs: 22000, priceUsd: 2000, onHand: 15, published: true },
   { name: "Ceramic Sink", sku: "DDT-060", categoryId: "cat-building-materials-and-fixtures--sinks", shortDescription: "Bathroom ceramic sink.", image: "/products/DDT-060.png", imageAlt: "Ceramic Sink", priceGhs: 45000, priceUsd: 4000, onHand: 8, published: true },
 ];
@@ -107,7 +106,7 @@ export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps
           products: db.products.size,
           published: [...db.variants.values()].filter((v) => v.published).length,
           orders: db.orders.size,
-          openTickets: [...db.tickets.values()].filter((t) => t.status !== "closed").length,
+          openTickets: [...db.tickets.values()].filter((t) => t.status === "open" || t.status === "pending").length,
           categories: db.categories.length,
         })));
       }
@@ -144,7 +143,7 @@ export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps
           const out: { name: string; sku: string }[] = [];
           for (const s of SAMPLE_SEED) {
             if ([...db.variants.values()].some((v) => v.id.split("::")[1] === s.sku)) continue;
-            const cat = db.categories.find((c) => c.id === s.categoryId) ?? db.categories[0];
+            const cat = db.categories.find((c) => c.id === s.categoryId) ?? db.categories.find((c) => c.parentId) ?? db.categories[0];
             if (!cat) continue;
             try {
               createProduct(db, actor, {
@@ -162,7 +161,7 @@ export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps
               });
               out.push({ name: s.name, sku: s.sku });
             } catch {
-              /* skip invalid row */
+              /* skip */
             }
           }
           return out;
