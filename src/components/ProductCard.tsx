@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { useState } from "react";
 import { Stars } from "@/components/Reviews";
 import { WishlistButton } from "@/components/WishlistButton";
 import { toast } from "sonner";
@@ -7,9 +8,24 @@ import { useCart } from "@/lib/cart";
 import { useCurrency } from "@/lib/currency";
 import { AVAILABILITY_LABEL, PROMO_LABEL } from "@/lib/domain/status";
 
+/** Soft brand stage when a product image fails to load. */
+const FALLBACK =
+  "data:image/svg+xml," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="816" height="816" viewBox="0 0 816 816">
+      <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#F4F6FA"/><stop offset="100%" stop-color="#DCE2EC"/>
+      </linearGradient></defs>
+      <rect width="816" height="816" fill="url(#g)"/>
+      <circle cx="408" cy="360" r="120" fill="#071D49" opacity="0.08"/>
+      <rect x="288" y="500" width="240" height="16" rx="8" fill="#071D49" opacity="0.12"/>
+    </svg>`,
+  );
+
 export function ProductCard({ p }: { p: StoreProduct }) {
   const { add } = useCart();
   const { mode, rate } = useCurrency();
+  const [src, setSrc] = useState(p.image || FALLBACK);
   const view = p;
   const price = displayPrice(p, mode, rate);
   const purchasable = isPurchasable(p);
@@ -22,18 +38,29 @@ export function ProductCard({ p }: { p: StoreProduct }) {
           ? "Enquire"
           : "Add to cart";
   const variantId = p.variantId;
+
   return (
-    <article className="group card-elevated overflow-hidden flex flex-col">
-      <Link to="/product/$slug" params={{ slug: p.slug }} className="relative block aspect-square overflow-hidden bg-muted">
+    <article className="product-card-3d group flex flex-col overflow-hidden rounded-[var(--radius)] border border-border bg-card shadow-[var(--shadow-card)]">
+      <Link
+        to="/product/$slug"
+        params={{ slug: p.slug }}
+        className="product-card-3d-stage relative block aspect-square w-full overflow-hidden"
+      >
+        {/* Depth plate behind the product */}
+        <span className="product-card-3d-plate" aria-hidden="true" />
         <img
-          src={p.image}
-          alt={p.imageAlt}
+          src={src}
+          alt={p.imageAlt || p.name}
           loading="lazy"
+          decoding="async"
           width={816}
           height={816}
-          className="h-full w-full object-contain p-2 transition-transform duration-500 group-hover:scale-[1.03]"
+          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+          className="product-card-3d-img relative z-[1] h-full w-full max-w-full object-contain p-3 sm:p-4 md:p-5"
+          onError={() => setSrc(FALLBACK)}
         />
-        <span className="absolute left-3 top-3 flex flex-wrap gap-1.5">
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] h-1/3 bg-gradient-to-t from-black/10 to-transparent" aria-hidden="true" />
+        <span className="absolute left-2 top-2 z-[3] flex flex-wrap gap-1.5 sm:left-3 sm:top-3">
           {view.availability !== "available" && (
             <span className="badge-preorder">{AVAILABILITY_LABEL[view.availability]}</span>
           )}
@@ -44,8 +71,8 @@ export function ProductCard({ p }: { p: StoreProduct }) {
           ))}
         </span>
       </Link>
-      <div className="flex flex-1 flex-col p-4">
-        <Link to="/product/$slug" params={{ slug: p.slug }} className="font-medium text-foreground hover:underline">
+      <div className="flex flex-1 flex-col p-3 sm:p-4">
+        <Link to="/product/$slug" params={{ slug: p.slug }} className="line-clamp-2 text-sm font-medium text-foreground hover:underline sm:text-base">
           {p.name}
         </Link>
         {p.rating && p.rating.count > 0 && (
@@ -63,7 +90,7 @@ export function ProductCard({ p }: { p: StoreProduct }) {
           {price.current.length === 0 && <span className="text-sm font-medium text-muted-foreground">Price on request</span>}
         </div>
         <button
-          className="btn-secondary mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="btn-secondary mt-3 w-full text-xs sm:mt-4 sm:text-sm disabled:cursor-not-allowed disabled:opacity-50"
           disabled={!purchasable}
           onClick={() => {
             if (!purchasable) return;
