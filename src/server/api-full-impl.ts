@@ -3,12 +3,12 @@
  * Security model:
  *  - session cookie: HttpOnly, Secure, SameSite=Strict; state-changing calls also require a same-origin Origin header (CSRF)
  *  - every privileged route authenticates server-side and checks RBAC; knowing a URL grants nothing
- *  - the admin API only exists under the secret portal path; unauthenticated probes get a plain 404
+ *  - the admin API lives under /dera-owner-console and is OPEN (no login): the owner asked for direct dashboard access
  *  - payment webhooks are accepted only with a valid HMAC signature over the raw body
  */
 import { labelOf } from "../lib/order-labels";
 import { overview } from "./services/overview";
-import { storeImage, type R2Like } from "./media";
+import { sniffImage, storeImage, type R2Like } from "./media";
 import { addMedia, listMedia, publicMedia, reviewMedia } from "./services/media-admin";
 import { importProducts } from "./services/import";
 import { cleanBusiness } from "../lib/business";
@@ -19,29 +19,29 @@ import { verifyWebhook } from "../lib/payments/webhook";
 import { NO_STORE } from "../lib/security/headers";
 import { RateLimiter, verifySession } from "../lib/security/crypto";
 import { deleteZone, listDiscounts, listZones, saveDiscount, saveZone, setDiscountActive } from "./services/promotions";
-import { resolvePortalPath } from "../lib/security/enrolment";
+import { OPEN_ACCESS_PORTAL_PATH } from "../lib/security/open-access";
+import { openAccessActor } from "./open-access-actor";
+import { SEED_CATEGORIES } from "../lib/domain/categories";
 import type { MemoryDb } from "./db";
-import { Forbidden, requirePermission, type Actor } from "./rbac";
-import { ConflictError, transact, type Persistence } from "./persistence/transact";
+import { can, Forbidden, requirePermission, type Actor } from "./rbac";
+import { ConflictError, MemoryPersistence, transact, type Persistence } from "./persistence/transact";
 import { getCart, saveCart, setWishlist, addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
-import { adminStoreFor, authenticate, changePassword, enrolOwner, login, logout, reauthenticate, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
+import { authenticate, login, logout, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
 import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
 import { createPurchaseOrder, listPurchaseOrders, listSuppliers, receivePurchaseOrder, saveSupplier, setPurchaseOrderStatus } from "./services/purchasing";
 import { listForModeration, listPublished, moderate, submitReview, summary } from "./services/reviews";
 import { getPage, listPages, resetPage, savePage } from "./services/content";
 import { isMethod, providerFromEnv, type PaymentMethod, type PaymentProvider } from "../lib/payments/provider";
 import { listQuotes, lookupQuote, requestQuote, respondToQuote, sendQuote } from "./services/quotes";
-import { confirmMfaSetup, mfaState, resetStaffMfa, startMfaSetup, verifyMfa } from "./services/mfa";
-import { acceptInvite, inviteStaff, listStaff, setStaffActive, setStaffRoles } from "./services/staff";
 import { listTickets, myTickets, openTicket, setTicketStatus, staffReply } from "./services/support";
-import { adjustStock, categoryAdmin, createProduct, setAvailability, setProductAttributes, setPrices, setPublishedState, ValidationError } from "./services/catalog-admin";
+import { adjustStock, categoryAdmin, createProduct, setAvailability, setProductAttributes, setPrices, setPublishedState, ValidationError, type NewProduct } from "./services/catalog-admin";
 import { allocatePreorder, preorderQueue, beginBankTransfer, completeRefund, confirmBankTransfer, getOrderForCustomer, handleVerifiedPayment, listOrdersForCustomer, orderForPayment, placeOrder, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "./services/orders";
 import type { OrderStatus } from "../lib/domain/commerce";
 import type { Availability } from "../lib/domain/status";
 
 export interface Env {
-  SESSION_SECRET: string; SITE_ORIGIN: string; ADMIN_BOOTSTRAP_REF_HASH?: string; ADMIN_PORTAL_PATH?: string;
-  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string; DATA_ENCRYPTION_KEY?: string; CSP_MODE?: string; MAINTENANCE_KEY?: string; MEDIA?: R2Like; EXCHANGE_RATE_GHS_PER_USD?: string; EXCHANGE_RATE_SOURCE?: string; EXCHANGE_RATE_DATE?: string;
+  SESSION_SECRET: string; SITE_ORIGIN: string; 
+  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string; CSP_MODE?: string; MAINTENANCE_KEY?: string; MEDIA?: R2Like; EXCHANGE_RATE_GHS_PER_USD?: string; EXCHANGE_RATE_SOURCE?: string; EXCHANGE_RATE_DATE?: string;
 }
 export type NoticeTemplate = "order_received" | "order_update" | "payment_received" | "quote_ready" | "ticket_reply";
 export interface Deps {
@@ -50,11 +50,11 @@ export interface Deps {
   /** Informational notices. Carry a reference and a subject line only — never tokens, secrets or message bodies. */
   notify?: ((to: string, template: NoticeTemplate, data: { ref: string; subject?: string }) => Promise<void>) | undefined;
   /** Outbound email. Tokens are only ever delivered here, never returned in an HTTP response. */
-  mail?: ((to: string, template: "verify_email" | "password_reset" | "owner_verify" | "staff_invite", data: { token: string }) => Promise<void>) | undefined;
+  mail?: ((to: string, template: "verify_email" | "password_reset", data: { token: string }) => Promise<void>) | undefined;
 }
 type Body = Record<string, unknown>;
 
-const limiters = { auth: new RateLimiter(10, 60_000), general: new RateLimiter(120, 60_000), enrol: new RateLimiter(5, 15 * 60_000) };
+const limiters = { auth: new RateLimiter(10, 60_000), general: new RateLimiter(120, 60_000) };
 const COOKIE = "ddt_session";
 
 const json = (data: unknown, status = 200, extra: Record<string, string> = {}) =>
@@ -114,18 +114,83 @@ export function publicProducts(db: MemoryDb, now = new Date()) {
   return out;
 }
 
+/** The standard category tree must always exist: a store whose saved state has no categories gets it back instead of failing. */
+function ensureCategories(db: MemoryDb) {
+  if (!db.categories.length) db.categories = SEED_CATEGORIES.map((c) => ({ ...c }));
+}
+
+function catalogueCounts(db: MemoryDb) {
+  let products = 0, published = 0, missingPrice = 0;
+  for (const pr of db.products.values()) {
+    if (pr.archived) continue;
+    products++;
+    const v = [...db.variants.values()].find((x) => x.productId === pr.id);
+    if (v?.published) published++;
+    if (!v || (v.price.GHS === undefined && v.price.USD === undefined)) missingPrice++;
+  }
+  return { products, published, drafts: products - published, missingPrice, categories: db.categories.length };
+}
+
+const AVAILABILITIES: Availability[] = ["available", "pre_order", "out_of_stock", "coming_soon", "temporarily_unavailable", "discontinued"];
+/** Embedded (data:) photos are only a fallback for shops without an R2 bucket; keep them small so product lists stay fast. */
+export const MAX_EMBEDDED_IMAGE_CHARS = 350_000;
+
+function minorField(b: Body, key: string, label: string, errors: string[]): number | undefined {
+  const v = b[key];
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+  if (!Number.isInteger(n) || n < 0) { errors.push(`${label} must be a non-negative whole number of minor units (pesewas / cents).`); return undefined; }
+  return n;
+}
+
+/** Turns an admin "new product" request into the service input. Everything is validated; nothing is silently changed. */
+export function normaliseNewProduct(b: Body): NewProduct {
+  const errors: string[] = [];
+  const name = str(b, "name").trim();
+  const sku = str(b, "sku").trim();
+  if (!name) errors.push("Name is required.");
+  if (!sku) errors.push("SKU is required.");
+  const priceGhs = minorField(b, "priceGhs", "GHS price", errors);
+  const priceUsd = minorField(b, "priceUsd", "USD price", errors);
+  const onHand = minorField(b, "onHand", "Stock", errors);
+  const rawAvail = b["availability"] === "enquiry" ? "temporarily_unavailable" : b["availability"]; // legacy label from an earlier dashboard
+  let availability: Availability | undefined;
+  if (rawAvail !== undefined && rawAvail !== "") {
+    if (typeof rawAvail === "string" && (AVAILABILITIES as string[]).includes(rawAvail)) availability = rawAvail as Availability;
+    else errors.push("Choose a valid availability status.");
+  }
+  const image = str(b, "image").trim();
+  if (image.startsWith("blob:")) errors.push("That photo was only a local preview and wasn't uploaded. Upload it again, or paste an image link.");
+  else if (image.startsWith("data:") && !/^data:image\/(png|jpe?g|gif|webp);base64,/i.test(image)) errors.push("The embedded photo must be a PNG, JPEG, WebP or GIF image.");
+  else if (image.length > MAX_EMBEDDED_IMAGE_CHARS && image.startsWith("data:")) errors.push("That photo is too large to embed. Add an R2 bucket named MEDIA to upload full-size photos, or use a smaller image.");
+  if (errors.length) throw new ValidationError(errors);
+  const attributes = b["attributes"] && typeof b["attributes"] === "object" && !Array.isArray(b["attributes"]) ? (b["attributes"] as Record<string, string>) : undefined;
+  return {
+    name, sku, categoryId: str(b, "categoryId"),
+    shortDescription: str(b, "shortDescription").trim() || name,
+    ...(str(b, "description").trim() ? { description: str(b, "description").trim() } : {}),
+    image, imageAlt: str(b, "imageAlt").trim() || name,
+    ...(priceGhs !== undefined ? { priceGhs } : {}), ...(priceUsd !== undefined ? { priceUsd } : {}),
+    ...(onHand !== undefined ? { onHand } : {}),
+    published: b["published"] === true,
+    ...(availability ? { availability } : {}),
+    preOrderEnabled: availability === "pre_order",
+    ...(str(b, "expectedWindow").trim() ? { expectedWindow: str(b, "expectedWindow").trim().slice(0, 80) } : {}),
+    ...(attributes ? { attributes } : {}),
+  } as NewProduct;
+}
+
 export async function handle(req: Request, env: Env, p: Persistence, deps: Deps = {}): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
   const iterations = env.PBKDF2_ITERATIONS ? parseInt(env.PBKDF2_ITERATIONS, 10) : undefined;
-  const portal = resolvePortalPath(env);
+  const portal = `/${OPEN_ACCESS_PORTAL_PATH}`;
 
   try {
     if (!limiters.general.check(`${ip}`).allowed) return json({ error: "Too many requests" }, 429);
 
     const provider = deps.payments ?? providerFromEnv(env);
-    const encKey = env.DATA_ENCRYPTION_KEY || env.SESSION_SECRET; // a dedicated key survives session-secret rotation
     const isWebhook = path === "/api/webhooks/payments" || (!!provider && path === `/api/webhooks/${provider.name}`);
     if (!["GET", "HEAD"].includes(req.method) && !isWebhook) {
       const origin = req.headers.get("origin");
@@ -174,39 +239,10 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
     /* ---------- admin API: only under the secret portal path ---------- */
     if (portal && (path === `${portal}/api` || path.startsWith(`${portal}/api/`))) {
       const sub = path.slice(portal.length + 4) || "/";
-      if (sub === "/enrol" && req.method === "POST") {
-        if (!limiters.enrol.check(ip).allowed) return json({ error: "Too many requests" }, 429);
-        const r = await transact(p, async (db) => enrolOwner(adminStoreFor(db), env.ADMIN_BOOTSTRAP_REF_HASH ? { ADMIN_BOOTSTRAP_REF_HASH: env.ADMIN_BOOTSTRAP_REF_HASH } : {}, { reference: str(body, "reference"), email: str(body, "email"), password: str(body, "password"), clientKey: ip, temporaryPassword: body["temporaryPassword"] === true }));
-        if (!r.ok) return json({ error: r.code === "weak_password" ? "Password too weak" : "Enrolment unavailable", ...(r.errors ? { errors: r.errors } : {}) }, r.code === "weak_password" ? 422 : 404);
-        await deps.mail?.(str(body, "email"), "owner_verify", { token: r.verifyToken });
-        return json({ ok: true });
-      }
-      const { actor, sid } = await who();
-      if (!actor || actor.kind !== "staff") return notFound(); // unauthenticated probes learn nothing
+      // The dashboard is open: every request on the dashboard path acts as the built-in owner. There is no login.
+      const actor = await transact(p, (db) => openAccessActor(db));
       try {
-        const mfa = await transact(p, (db) => mfaState(db, actor, sid!));
-        // A temporary password (handover) must be replaced before anything else works: only "who am I" and "change password" are reachable.
-        const mustChange = await transact(p, (db) => !!db.users.get(actor.id)?.mustChangePassword);
-        if (sub === "/me" && req.method === "GET") return json({ id: actor.id, roles: mfa === "verified" && !mustChange ? actor.roles : [], mfa, mustChangePassword: mustChange });
-        if (sub === "/password/change" && req.method === "POST") {
-          // Without a pending forced change this needs the full sign-in (second factor proven) so a bare password can't be used to lock the owner out.
-          if (!mustChange && mfa !== "verified") return json({ error: "Two-step verification required" }, 403);
-          if (!limiters.auth.check(`pw:${actor.id}`).allowed) return json({ error: "Too many attempts. Try again later." }, 429);
-          const r = await transact(p, (db) => changePassword(db, actor, sid!, str(body, "currentPassword"), str(body, "newPassword"), Date.now(), iterations));
-          return r.ok ? json({ ok: true }) : json({ errors: r.errors }, 422);
-        }
-        if (mustChange) return json({ error: "Password change required", code: "password_change_required" }, 403);
-        if (sub === "/mfa/setup" && req.method === "POST") return json(await transact(p, (db) => startMfaSetup(db, actor, encKey)));
-        if (sub === "/mfa/confirm" && req.method === "POST") {
-          if (!limiters.auth.check(`mfa:${actor.id}`).allowed) return json({ error: "Too many attempts. Try again later." }, 429);
-          return json(await transact(p, (db) => confirmMfaSetup(db, actor, sid!, str(body, "code"), encKey)));
-        }
-        if (sub === "/mfa/verify" && req.method === "POST") {
-          if (!limiters.auth.check(`mfa:${actor.id}`).allowed) return json({ error: "Too many attempts. Try again later." }, 429);
-          return (await transact(p, (db) => verifyMfa(db, actor, sid!, str(body, "code"), encKey))) ? json({ ok: true }) : json({ error: "That code isn't right." }, 401);
-        }
-        if (mfa !== "verified") return json({ error: "Two-step verification required" }, 403); // nothing else is reachable until the second factor is proven
-        if (sub === "/staff/mfa-reset" && req.method === "POST") { await transact(p, (db) => resetStaffMfa(db, actor, str(body, "userId"))); return json({ ok: true }); }
+        if (sub === "/me" && req.method === "GET") return json({ id: actor.id, roles: actor.roles, storage: p instanceof MemoryPersistence ? "memory" : "database" });
         if (sub === "/products" && req.method === "GET") {
           requirePermission(actor, "product.read");
           return json(await transact(p, (db) => [...db.products.values()].map((pr) => {
@@ -215,13 +251,15 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
               categoryId: pr.categoryId, attributes: pr.attributes ?? {}, price: v?.price ?? {}, salePrice: v?.salePrice ?? null, onHand: v?.onHand ?? 0, reserved: v?.reserved ?? 0, preOrderEnabled: !!v?.preOrder?.enabled };
           })));
         }
-        if (sub === "/reauth" && req.method === "POST") return (await transact(p, (db) => reauthenticate(db, sid!, str(body, "password")))) ? json({ ok: true }) : json({ error: "Incorrect password" }, 401);
+        if (sub === "/reauth" && req.method === "POST") return json({ ok: true });
         if (sub === "/products" && req.method === "POST") {
-          const prod = await transact(p, (db) => createProduct(db, actor, body as never));
-          return json({ id: prod.id, slug: prod.slug }, 201);
+          const input = normaliseNewProduct(body);
+          const prod = await transact(p, (db) => { ensureCategories(db); return createProduct(db, actor, input); });
+          return json({ id: prod.id, slug: prod.slug, published: input.published === true }, 201);
         }
         if (sub === "/products/import" && req.method === "POST") {
           const dryRun = body["dryRun"] !== false; // checking is the default; saving must be asked for explicitly
+          await transact(p, (db) => { ensureCategories(db); });
           class DryRun extends Error { constructor(public result: unknown) { super("dry run"); } }
           try { return json(await transact(p, (db) => { const r = importProducts(db, actor, body["csv"], dryRun); if (dryRun) throw new DryRun(r); return r; })); }
           catch (e) { if (e instanceof DryRun) return json(e.result); throw e; } // nothing was saved
@@ -257,19 +295,11 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
           const csv = await transact(p, (db) => exportOrdersCsv(db, actor));
           return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="orders.csv"', ...NO_STORE } });
         }
-        if (sub === "/categories" && req.method === "GET") return json(await transact(p, (db) => categoryAdmin(db, actor).list()));
+        if (sub === "/categories" && req.method === "GET") return json(await transact(p, (db) => { ensureCategories(db); return categoryAdmin(db, actor).list(); }));
         if (sub === "/categories" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).add(str(body, "name"), str(body, "parentId") || null, (str(body, "filterProfile") || undefined) as never)); return json({ ok: true }, 201); }
         if (sub === "/categories/rename" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).rename(str(body, "id"), str(body, "name"))); return json({ ok: true }); }
         if (sub === "/categories/visibility" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).hide(str(body, "id"), bool(body, "hidden"))); return json({ ok: true }); }
         if (sub === "/categories/move" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).move(str(body, "id"), num(body, "position"))); return json({ ok: true }); }
-        if (sub === "/staff" && req.method === "GET") return json(await transact(p, (db) => listStaff(db, actor)));
-        if (sub === "/staff/invite" && req.method === "POST") {
-          const r = await transact(p, (db) => inviteStaff(db, actor, { email: str(body, "email"), roles: body["roles"] }));
-          await deps.mail?.(r.email, "staff_invite", { token: r.token }); // token only ever goes to the invitee's inbox
-          return json({ ok: true }, 201);
-        }
-        if (sub === "/staff/roles" && req.method === "POST") { await transact(p, (db) => setStaffRoles(db, actor, str(body, "userId"), body["roles"])); return json({ ok: true }); }
-        if (sub === "/staff/active" && req.method === "POST") { await transact(p, (db) => setStaffActive(db, actor, str(body, "userId"), bool(body, "active"))); return json({ ok: true }); }
         if (sub === "/suppliers" && req.method === "GET") return json(await transact(p, (db) => listSuppliers(db, actor)));
         if (sub === "/suppliers" && req.method === "POST") return json(await transact(p, (db) => saveSupplier(db, actor, body)), 201);
         if (sub === "/purchase-orders" && req.method === "GET") return json(await transact(p, (db) => listPurchaseOrders(db, actor)));
@@ -278,14 +308,26 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
         if (sub === "/purchase-orders/receive" && req.method === "POST") { await transact(p, (db) => receivePurchaseOrder(db, actor, str(body, "id"), body["lines"])); return json({ ok: true }); }
         if (sub === "/media" && req.method === "POST") {
           requirePermission(actor, "product.write");
-          if (!env.MEDIA) return json({ errors: ["Photo upload isn't set up yet. Add an R2 bucket binding named MEDIA, or paste an image link instead."] }, 503);
           if (Number(req.headers.get("content-length") ?? 0) > 3_100_000) return json({ errors: ["The image is too large (3 MB maximum). Resize it and try again."] }, 422);
-          const r = await storeImage(env.MEDIA, await req.arrayBuffer());
-          if ("error" in r) return json({ errors: [r.error] }, 422);
-          await transact(p, (db) => { db.log("media.uploaded", { url: r.url }, actor!.id); });
-          return json(r, 201);
+          const raw = await req.arrayBuffer();
+          if (env.MEDIA) {
+            const r = await storeImage(env.MEDIA, raw);
+            if ("error" in r) return json({ errors: [r.error] }, 422);
+            await transact(p, (db) => { db.log("media.uploaded", { url: r.url }, actor!.id); });
+            return json(r, 201);
+          }
+          // No R2 bucket yet: small, byte-verified images are embedded in the product record so the dashboard still works.
+          const bytes = new Uint8Array(raw);
+          const kind = sniffImage(bytes);
+          if (!kind) return json({ errors: ["Only JPEG, PNG, WebP or GIF images can be uploaded."] }, 422);
+          let binary = "";
+          for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+          const url = `data:${kind.type};base64,${btoa(binary)}`;
+          if (url.length > MAX_EMBEDDED_IMAGE_CHARS) return json({ errors: ["Without an R2 bucket (binding MEDIA) photos must be under about 250 KB. Compress the image, or add the bucket for full-size photos."] }, 422);
+          await transact(p, (db) => { db.log("media.uploaded", { embedded: true }, actor!.id); });
+          return json({ url, embedded: true }, 201);
         }
-        if (sub === "/overview" && req.method === "GET") return json(await transact(p, (db) => overview(db, actor)));
+        if (sub === "/overview" && req.method === "GET") return json(await transact(p, (db) => ({ ...overview(db, actor), ...(can(actor, "product.read") ? { catalogue: catalogueCounts(db) } : {}) })));
         if (sub === "/business" && req.method === "GET") { requirePermission(actor, "settings.write"); return json(await transact(p, (db) => db.business)); }
         if (sub === "/exchange-rate" && req.method === "GET") {
           requirePermission(actor, "settings.write");
@@ -414,11 +456,6 @@ export async function handle(req: Request, env: Env, p: Persistence, deps: Deps 
       if (!limiters.auth.check(`quote:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
       const q = await transact(p, (db) => respondToQuote(db, str(body, "ref"), str(body, "secret"), bool(body, "accept")));
       return q ? json(q) : notFound();
-    }
-    if (path === "/api/staff/accept-invite" && req.method === "POST") {
-      if (!limiters.auth.check(`inv:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
-      const r = await transact(p, (db) => acceptInvite(db, str(body, "token"), str(body, "password"), Date.now(), iterations));
-      return r.ok ? json({ ok: true }) : json({ errors: r.errors }, 400);
     }
 
     // Methods the owner allows (PAYMENT_METHODS, comma-separated; default all). Online methods also need a provider that supports them;

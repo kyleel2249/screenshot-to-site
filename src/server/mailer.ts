@@ -12,9 +12,7 @@ export interface Message { to: string; subject: string; text: string; html: stri
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const PATH: Record<Template, { path: string; subject: string; intro: string; cta: string; expiry: string }> = {
   verify_email: { path: "/verify-email", subject: "Verify your email — Dera Darko Trade", intro: "Thanks for creating an account. Confirm your email address to activate it.", cta: "Verify email", expiry: "This link expires in 24 hours." },
-  owner_verify: { path: "/verify-email", subject: "Verify the owner email — Dera Darko Trade", intro: "Confirm this email address to finish setting up the owner account.", cta: "Verify email", expiry: "This link expires in 24 hours." },
   password_reset: { path: "/reset-password", subject: "Reset your password — Dera Darko Trade", intro: "We received a request to reset your password. If this wasn't you, ignore this email and your password stays the same.", cta: "Choose a new password", expiry: "This link expires in 30 minutes and works once." },
-  staff_invite: { path: "/accept-invite", subject: "You're invited to the Dera Darko Trade team", intro: "You've been invited to help run the shop. Set your password to activate your staff account.", cta: "Accept invitation", expiry: "This link expires in 72 hours and works once." },
 };
 
 export function buildMessage(env: Pick<MailEnv, "SITE_ORIGIN">, to: string, template: Template, token: string): Message {

@@ -2,7 +2,6 @@ import "./lib/error-capture";
 
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
-import { STAFF_OPEN_ACCESS } from "./lib/security/open-access";
 import { createMailer, createNotifier } from "./server/mailer";
 import { route } from "./server/edge";
 import { runMaintenance } from "./server/maintenance";
@@ -52,56 +51,47 @@ async function renderApp(request: Request, env: unknown, ctx: unknown): Promise<
   }
 }
 
-function apiConfigured(env: unknown): env is WorkerEnv {
-  const e = env as Partial<WorkerEnv> | null | undefined;
-  return !!e && !!e.DB && !!e.SESSION_SECRET && !!e.SITE_ORIGIN;
-}
-
-/** Shared in-memory store for open-access mode (survives within one Worker isolate). */
+/** Shared in-memory store used when no D1 database is bound (survives within one Worker isolate only). */
 const memoryPersistence = new MemoryPersistence();
 
-function openAccessEnv(request: Request, env: unknown): WorkerEnv {
+function apiEnvFor(request: Request, env: unknown): WorkerEnv {
   const e = (env ?? {}) as Partial<WorkerEnv> & Record<string, unknown>;
   const origin = (typeof e.SITE_ORIGIN === "string" && e.SITE_ORIGIN) || new URL(request.url).origin;
   return {
     ...e,
     DB: e.DB as WorkerEnv["DB"],
-    SESSION_SECRET: (typeof e.SESSION_SECRET === "string" && e.SESSION_SECRET) || "dev-open-access-session-secret-change-me",
+    // Without a configured secret, sessions are signed with a per-isolate random value (never a published constant).
+    SESSION_SECRET: (typeof e.SESSION_SECRET === "string" && e.SESSION_SECRET) || fallbackSecret(),
     SITE_ORIGIN: origin,
   } as WorkerEnv;
 }
 
+let generatedSecret: string | undefined;
+function fallbackSecret(): string {
+  if (!generatedSecret) {
+    const b = new Uint8Array(32);
+    crypto.getRandomValues(b);
+    generatedSecret = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  }
+  return generatedSecret;
+}
+
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
-    if (apiConfigured(env)) {
-      return route(request, env, new D1Persistence(env.DB), (r) => renderApp(r, env, ctx), {
-        mail: createMailer(env),
-        notify: createNotifier(env),
-      });
-    }
-    // TEMP open access: API runs without Cloudflare secrets/D1 so enrol + login work during setup.
-    if (STAFF_OPEN_ACCESS) {
-      const openEnv = openAccessEnv(request, env);
-      const persistence = openEnv.DB ? new D1Persistence(openEnv.DB) : memoryPersistence;
-      return route(request, openEnv, persistence, (r) => renderApp(r, openEnv, ctx), {
-        mail: createMailer(openEnv),
-        notify: createNotifier(openEnv),
-      });
-    }
-    const path = new URL(request.url).pathname;
-    if (path.startsWith("/api/") || path.includes("/api/")) {
-      return new Response(JSON.stringify({ error: "Service not configured" }), {
-        status: 503,
-        headers: { "content-type": "application/json" },
-      });
-    }
-    return renderApp(request, env, ctx);
+    // The API always runs: on Cloudflare D1 when a `DB` binding exists, otherwise on in-memory storage (data is lost on restart).
+    const apiEnv = apiEnvFor(request, env);
+    const persistence = apiEnv.DB ? new D1Persistence(apiEnv.DB) : memoryPersistence;
+    return route(request, apiEnv, persistence, (r) => renderApp(r, env, ctx), {
+      mail: createMailer(apiEnv),
+      notify: createNotifier(apiEnv),
+    });
   },
   async scheduled(_event: unknown, env: unknown, ctx: { waitUntil(p: Promise<unknown>): void }) {
-    if (!apiConfigured(env)) return;
+    const e = env as Partial<WorkerEnv> | null | undefined;
+    if (!e?.DB) return;
     ctx.waitUntil(
-      runMaintenance(new D1Persistence(env.DB)).catch((e) => {
-        console.error("maintenance failed", e);
+      runMaintenance(new D1Persistence(e.DB)).catch((err) => {
+        console.error("maintenance failed", err);
       }),
     );
   },

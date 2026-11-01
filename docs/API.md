@@ -23,9 +23,9 @@ Session cookie `ddt_session` is HttpOnly, Secure, SameSite=Strict.
 `GET|POST /api/account/addresses`, `GET /api/account/export`, `POST /api/account/delete`.
 Other customers' resources return 404 (indistinguishable from missing).
 
-## Admin (only under the secret `ADMIN_PORTAL_PATH`, e.g. `/ops-xxxx/api/...`)
+## Admin (open, no login; only under `/dera-owner-console/api/...`)
 Unauthenticated or non-staff requests receive a plain 404. Authorisation is checked per action (RBAC).
-`POST /enrol` (one-time), `POST /reauth`, `POST /products`, `POST /products/status` (bulk, all-or-nothing), `POST /products/publish`,
+`POST /reauth` (always ok), `POST /products`, `POST /products/status` (bulk, all-or-nothing), `POST /products/publish`,
 `POST /prices`, `POST /stock`, `GET /orders`, `POST /orders/status`, `POST /refunds` (+ recent re-auth), `POST /refunds/complete`,
 `GET /export/orders.csv` (+ recent re-auth), `GET /audit`.
 

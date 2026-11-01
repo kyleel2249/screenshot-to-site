@@ -16,7 +16,7 @@ export interface ProductRow {
   image: string; imageAlt: string; promo: PromoWindow[]; showLimitedBelow?: number; expectedWindow?: string; attributes: Record<string, string>; media?: MediaItem[];
   createdAt: string; updatedAt: string; archived: boolean;
 }
-export interface UserRow { id: string; email: string; passwordHash: string; kind: "customer" | "staff"; roles: Role[]; status: "active" | "suspended" | "deleted"; emailVerified: boolean; failedLogins: number; lockedUntil: number; mfaRequired: boolean; /** Set for accounts created with a temporary password: nothing but "change password" works until it is changed. */ mustChangePassword?: boolean; mfa?: { secret: string; confirmed: boolean; lastStep: number; recovery: string[]; failures?: number }; createdAt: number }
+export interface UserRow { id: string; email: string; passwordHash: string; kind: "customer" | "staff"; roles: Role[]; status: "active" | "suspended" | "deleted"; emailVerified: boolean; failedLogins: number; lockedUntil: number; mfaRequired: boolean; createdAt: number }
 export interface ProfileRow { userId: string; firstName: string; lastName: string; phone?: string; preferredCurrency?: Currency; marketingConsent: boolean }
 export interface AddressRow { id: string; userId: string; recipient: string; region: string; city: string; street: string; phone?: string; isDefault: boolean }
 export interface OrderItemRow { variantId: string; name: string; sku: string; unit: number; qty: number; line: number; mode: "stock" | "preorder" | "backorder" }
@@ -29,7 +29,7 @@ export interface OrderRow {
   /** Recorded by staff once known (never invented); shown to the customer on tracking. */
   shipment?: { carrier?: string; trackingRef?: string; estimatedDelivery?: string };
 }
-export interface SessionRow { id: string; userId: string; expiresAt: number; revoked: boolean; authAt: number; mfaOk?: boolean }
+export interface SessionRow { id: string; userId: string; expiresAt: number; revoked: boolean; authAt: number }
 export interface TicketRow { id: string; userId?: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: "low" | "normal" | "high"; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }
 export interface EventRow { session: string; kind: string; path?: string; source?: string; campaign?: string; orderRef?: string; at: number }
 export interface QuoteRow {
@@ -94,7 +94,6 @@ export class MemoryDb {
   business: import("../lib/business").BusinessInfo = {};
   settings: Record<string, string> = { displayMode: "DUAL" };
   exchangeRate?: import("../lib/domain/exchange").ApprovedRate;
-  adminSetupClosed = false;
   redemptions = new Map<string, number>(); // `${userId}|${code}`
   guestSessions = new Map<string, GuestSessionRow>();
   enquiries = new Map<string, EnquiryRow>();

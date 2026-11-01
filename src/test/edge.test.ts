@@ -7,10 +7,10 @@ import { createProduct } from "../server/services/catalog-admin";
 import { injectProductSeo, safeJson } from "../server/seo-inject";
 import { MemoryPersistence, transact } from "../server/persistence/transact";
 
-const ORIGIN = "https://shop.test", PORTAL = "/ops-k7q2m9x4p1z8";
+const ORIGIN = "https://shop.test", PORTAL = "/dera-owner-console";
 async function setup() {
   const p = new MemoryPersistence();
-  const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref") };
+  const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000" };
   await transact(p, (db) => {
     db.categories = [...SEED_CATEGORIES];
     db.products.set("p1", { id: "p1", slug: "pub-item", name: "Pub", categoryId: "x", shortDescription: "s", image: "i", imageAlt: "a", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-02-03T00:00:00Z", archived: false } as never);
@@ -31,11 +31,11 @@ describe("edge router", () => {
     expect(calls()).toBe(1); expect(await r.text()).toContain("app");
     expect(r.headers.get("x-frame-options")).toBe("DENY"); expect(r.headers.get("x-content-type-options")).toBe("nosniff"); expect(r.headers.get("cache-control")).toBeNull();
   });
-  test("API and secret-portal API never reach SSR; wrong portal does not exist", async () => {
+  test("API and dashboard API never reach SSR; dashboard API is served without a sign-in", async () => {
     const { p, env, ssr, calls } = await setup();
     const empty = new MemoryPersistence();
     expect(await (await route(get("/api/products"), env, empty, ssr)).json()).toEqual([]);
-    expect((await route(get(`${PORTAL}/api/me`), env, p, ssr)).status).toBe(404);
+    expect((await route(get(`${PORTAL}/api/me`), env, p, ssr)).status).toBe(200);
     expect(calls()).toBe(0);
   });
   test("private pages are no-store + noindex; portal page likewise", async () => {
@@ -61,7 +61,7 @@ describe("product page SEO injection", () => {
   const shell = '<html><head><title>Dera Darko Trade</title><meta name="description" content="Quality imported products in Ghana."><meta property="og:type" content="website"><link rel="canonical" href="https://shop.test/"></head><body>app</body></html>';
   async function withProduct(extra: Record<string, unknown> = {}) {
     const p = new MemoryPersistence();
-    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref") };
+    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000" };
     await transact(p, (db) => { createProduct(db, owner, { name: 'Cap <b>"x"</b> & Co', categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "Soft cotton </script><script>alert(1)</script>", image: "/img/cap.jpg", imageAlt: "cap", sku: "CAP", priceGhs: 12550, onHand: 5, published: true, ...extra } as never); });
     const ssr = async () => new Response(shell, { headers: { "content-type": "text/html; charset=utf-8" } });
     return { p, env, ssr };
@@ -125,7 +125,7 @@ describe("content security policy at the edge", () => {
   });
   test("product pages with injected SEO carry the nonce on the JSON-LD block", async () => {
     const p = new MemoryPersistence();
-    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref") };
+    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000" };
     await transact(p, (db) => { createProduct(db, { id: "o", kind: "staff", roles: ["owner"], recentAuthAt: Date.now() }, { name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "d", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 1000, onHand: 1, published: true } as never); });
     const slug = await transact(p, (db) => [...db.products.values()][0]!.slug);
     const r = await route(get(`/product/${slug}`), env, p, async () => new Response("<html><head><title>x</title></head><body></body></html>", { headers: { "content-type": "text/html" } }));

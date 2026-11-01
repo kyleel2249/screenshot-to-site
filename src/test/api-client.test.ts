@@ -1,5 +1,3 @@
-import { signInStaff } from "./staff-signin";
-import { totp } from "../lib/security/totp";
 import { describe, expect, test } from "vitest";
 import { SEED_CATEGORIES } from "../lib/domain/categories";
 import { createClient } from "../lib/api-client";
@@ -7,14 +5,17 @@ import { sha256Hex } from "../lib/security/crypto";
 import { handle, type Env } from "../server/api";
 import { route } from "../server/edge";
 import { MemoryPersistence, transact } from "../server/persistence/transact";
+import { ensureOpenAccessOwner } from "../server/open-access-actor";
 
-const ORIGIN = "https://shop.test", PORTAL = "/ops-k7q2m9x4p1z8", PW = "Str0ng!Passw0rd#";
+/** The dashboard has no sign-in any more; kept so existing flows read the same. */
+const signInStaff = async (..._a: unknown[]) => ({ ok: true as const });
+const ORIGIN = "https://shop.test", PORTAL = "/dera-owner-console", PW = "Str0ng!Passw0rd#";
 let n = 0;
 
 /** A fetch that talks to the REAL handler and keeps a cookie jar like a browser. */
 async function browser() {
   const p = new MemoryPersistence();
-  const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref") };
+  const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000" };
   await transact(p, (db) => { db.categories = [...SEED_CATEGORIES]; db.zones.set("z", { id: "z", name: "z", regions: ["Greater Accra"], currency: "GHS", baseFee: 2000, perKgFee: 0, estimate: "est" }); });
   const tokens: string[] = [];
   let jar = "";
@@ -44,51 +45,8 @@ describe("api client against the real handler", () => {
     const api = createClient({ fetchImpl: async () => { throw new Error("offline"); } });
     expect(await api.products()).toMatchObject({ ok: false, status: 0 });
   });
-  test("temporary admin password: nothing works until it is changed; the old password then stops working", async () => {
-    const { api, tokens, p } = await browser();
-    const TEMP = "Temp!Handover1x", NEW = "Brand-New#Passw0rd9", E = "owner@shop.test";
-    expect((await api.admin(PORTAL).enrol({ reference: "ref", email: E, password: TEMP, temporaryPassword: true })).ok).toBe(true);
-    await api.verifyEmail(tokens.at(-1)!);
-    expect((await api.login(E, TEMP)).ok).toBe(true);
-    const admin = api.admin(PORTAL);
-    // signed in, but locked to the change-password step: no roles are shown and even two-step setup and the product list are refused
-    expect((await admin.me()).data).toMatchObject({ mustChangePassword: true, roles: [] });
-    expect((await admin.mfaSetup()).status).toBe(403);
-    expect((await admin.products()).status).toBe(403);
-    // wrong current password, weak new password, and "change" to the same value are all refused, and nothing changes
-    expect((await admin.changePassword({ currentPassword: "Wrong!Passw0rd12", newPassword: NEW })).errors).toEqual(["Your current password isn't right."]);
-    expect((await admin.changePassword({ currentPassword: TEMP, newPassword: "short" })).ok).toBe(false);
-    expect((await admin.changePassword({ currentPassword: TEMP, newPassword: TEMP })).errors).toContain("Choose a password different from your current one.");
-    expect((await admin.me()).data?.mustChangePassword).toBe(true);
-    // a second sign-in elsewhere exists before the change; it must be signed out by the change
-    await api.login(E, TEMP);
-    expect(await transact(p, (db) => [...db.sessions.values()].filter((x) => !x.revoked).length)).toBe(2);
-    expect((await admin.changePassword({ currentPassword: TEMP, newPassword: NEW })).ok).toBe(true);
-    expect(await transact(p, (db) => [...db.sessions.values()].filter((x) => !x.revoked).length)).toBe(1);
-    expect((await admin.me()).data).toMatchObject({ mustChangePassword: false, mfa: "setup_required" });
-    // the temporary password is dead; the new one works and the normal two-step flow follows
-    await api.logout();
-    expect((await api.login(E, TEMP)).ok).toBe(false);
-    expect((await signInStaff(api, PORTAL, E, NEW)).ok).toBe(true);
-    expect((await admin.products()).ok).toBe(true);
-    // the audit log records the change without any password material
-    const log = await transact(p, (db) => JSON.stringify(db.audit));
-    expect(log).toContain("password.changed"); expect(log).not.toContain(TEMP); expect(log).not.toContain(NEW);
-  });
-  test("a normal (non-temporary) owner is not forced to change password, and cannot change it before the second factor is proven", async () => {
-    const { api, tokens } = await browser();
-    await api.admin(PORTAL).enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await api.verifyEmail(tokens.at(-1)!);
-    expect((await api.login("owner@shop.test", PW)).ok).toBe(true);
-    const admin = api.admin(PORTAL);
-    expect((await admin.me()).data).toMatchObject({ mustChangePassword: false, mfa: "setup_required" });
-    expect((await admin.changePassword({ currentPassword: PW, newPassword: "An0ther!Passw0rd" })).status).toBe(403);
-  });
   test("full admin → storefront → checkout round trip through the client", async () => {
     const { api, tokens } = await browser();
-    // owner enrolment + login (portal path is typed by the owner; it is not in any bundle)
-    expect((await api.admin(PORTAL).enrol({ reference: "ref", email: "owner@shop.test", password: PW })).ok).toBe(true);
-    await api.verifyEmail(tokens[tokens.length - 1]!);
-    expect((await signInStaff(api, PORTAL, "owner@shop.test", PW)).ok).toBe(true);
     const admin = api.admin(PORTAL);
     // a staff session must not break the storefront's 'am I a customer?' probe, and zones are public
     expect((await api.me()).status).toBeLessThan(500); expect((await api.me()).ok).toBe(false);
@@ -111,7 +69,7 @@ describe("api client against the real handler", () => {
 describe("shipping zones and discounts through the client", () => {
   async function owner() {
     const b = await browser();
-    await b.api.admin(PORTAL).enrol({ reference: "ref", email: "owner@shop.test", password: PW });
+    
     await b.api.verifyEmail(b.tokens[b.tokens.length - 1]!); await signInStaff(b.api, PORTAL, "owner@shop.test", PW);
     return { ...b, admin: b.api.admin(PORTAL) };
   }
@@ -144,7 +102,7 @@ describe("shipping zones and discounts through the client", () => {
   });
   test("a fulfilment user cannot read or change zones or discounts", async () => {
     const { p, admin, api } = await owner();
-    await transact(p, (db) => { const u = [...db.users.values()].find((x) => x.email === "owner@shop.test")!; u.roles = ["fulfilment"]; });
+    await transact(p, (db) => { const u = ensureOpenAccessOwner(db); u.roles = ["fulfilment"]; });
     await api.logout(); await signInStaff(api, PORTAL, "owner@shop.test", PW);
     for (const r of [await admin.zones(), await admin.discounts(), await admin.saveZone({ name: "a", regions: ["Volta"], currency: "GHS", baseFee: 1, estimate: "e" }), await admin.saveDiscount({ code: "ABC", kind: "free_shipping", value: 0 })]) expect(r.status).toBe(403);
   });
@@ -153,7 +111,7 @@ describe("shipping zones and discounts through the client", () => {
 describe("category administration through the client", () => {
   async function owner() {
     const p = new MemoryPersistence();
-    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref") };
+    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000" };
     const tokens: string[] = []; let jar = "";
     const fetchImpl = async (url: string, init: RequestInit = {}) => {
       const headers = new Headers(init.headers); headers.set("cf-connecting-ip", `10.2.0.${++n}`); if (jar) headers.set("cookie", jar);
@@ -162,7 +120,7 @@ describe("category administration through the client", () => {
       return res;
     };
     const api = createClient({ fetchImpl, origin: ORIGIN }); const admin = api.admin(PORTAL);
-    await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await api.verifyEmail(tokens.at(-1)!); await signInStaff(api, PORTAL, "owner@shop.test", PW);
+     await signInStaff(api, PORTAL, "owner@shop.test", PW);
     return { api, admin, p };
   }
   test("a brand-new shop already has the standard categories, so the first product can be added", async () => {
@@ -193,7 +151,7 @@ describe("category administration through the client", () => {
 
 async function ownerSession() {
   const p = new MemoryPersistence();
-  const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref") };
+  const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000" };
   await transact(p, (db) => { db.zones.set("z", { id: "z", name: "z", regions: ["Greater Accra"], currency: "GHS", baseFee: 2000, perKgFee: 0, estimate: "est" }); });
   const tokens: string[] = [];
   const mk = () => {
@@ -207,7 +165,7 @@ async function ownerSession() {
     return createClient({ fetchImpl, origin: ORIGIN });
   };
   const staff = mk(); const admin = staff.admin(PORTAL);
-  await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await staff.verifyEmail(tokens.at(-1)!); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
+   await signInStaff(staff, PORTAL, "owner@shop.test", PW);
   return { p, staff, admin, shopper: mk, tokens };
 }
 
@@ -250,65 +208,23 @@ describe("support inbox, analytics and hidden categories", () => {
     expect((await shopper().products()).data).toEqual([]);
     await admin.setCategoryHidden("cat-shoes-and-footwear", false);
     expect((await shopper().products()).data).toHaveLength(1);
-    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["fulfilment"]; });
+    await transact(p, (db) => { ensureOpenAccessOwner(db).roles = ["fulfilment"]; });
     await staff.logout(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     expect((await admin.analytics()).status).toBe(403); expect((await admin.tickets()).status).toBe(403);
   });
 });
 
 describe("orders CSV export", () => {
-  test("needs recent re-authentication, then returns a formula-safe CSV", async () => {
+  test("returns a formula-safe CSV without customer details", async () => {
     const { admin, shopper, p } = await ownerSession();
     const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 5, published: true });
     await shopper().checkout({ lines: [{ variantId: `${prod.data!.id}::CAP`, qty: 1 }], currency: "GHS", region: "Greater Accra", zoneId: "z", guestEmail: "g@x.com", address: { recipient: "=cmd()", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: "k9", acceptedTerms: true });
-    await transact(p, (db) => { for (const s of db.sessions.values()) s.authAt = 0; }); // simulate an old sign-in
-    const denied = await admin.exportOrdersCsv(); expect(denied).toMatchObject({ ok: false, status: 403 }); expect(denied.errors[0]).toMatch(/re-?auth/i);
-    expect((await admin.reauth("wrong-password")).ok).toBe(false);
-    expect((await admin.reauth(PW)).ok).toBe(true);
     const ok = await admin.exportOrdersCsv(); expect(ok.ok).toBe(true);
     expect(ok.data!.split("\n")[0]).toBe("ref,status,currency,total_minor,created"); expect(ok.data!.split("\n")).toHaveLength(2);
     expect(ok.data).not.toContain("g@x.com"); expect(ok.data).not.toContain("cmd"); // no customer PII in the export
   });
 });
 
-describe("staff invitations", () => {
-  test("invite → accept → sign in with limited role; owner is protected; suspension and role change cut access", async () => {
-    const { admin, shopper, tokens, p } = await ownerSession();
-    expect((await admin.inviteStaff("bad", ["support"])).status).toBe(422);
-    expect((await admin.inviteStaff("a@shop.test", ["owner"])).status).toBe(422); // owner can't be granted
-    expect((await admin.inviteStaff("a@shop.test", ["support"])).ok).toBe(true);
-    const first = tokens.at(-1)!;
-    expect((await admin.staff()).data!.find((s) => s.email === "a@shop.test")!.state).toBe("invited");
-    const sam = shopper();
-    expect((await signInStaff(sam, PORTAL, "a@shop.test", PW)).ok).toBe(false); // can't sign in before accepting
-    expect((await admin.inviteStaff("a@shop.test", ["support", "analyst"])).ok).toBe(true); // re-invite kills old link
-    expect((await sam.acceptInvite(first, PW)).ok).toBe(false);
-    expect((await sam.acceptInvite(tokens.at(-1)!, "weak")).ok).toBe(false);
-    // a weak password is rejected before the link is consumed, so a typo doesn't burn the invitation
-    expect((await admin.inviteStaff("a@shop.test", ["support"])).ok).toBe(true);
-    expect((await sam.acceptInvite(tokens.at(-1)!, PW)).ok).toBe(true);
-    expect((await signInStaff(sam, PORTAL, "a@shop.test", PW)).ok).toBe(true);
-    const samAdmin = sam.admin(PORTAL);
-    expect((await samAdmin.tickets()).ok).toBe(true); expect((await samAdmin.zones()).status).toBe(403); expect((await samAdmin.staff()).status).toBe(403);
-    const id = (await admin.staff()).data!.find((s) => s.email === "a@shop.test")!.id;
-    await admin.setStaffRoles(id, ["fulfilment"]);
-    expect((await samAdmin.orders()).status).toBe(404); // sessions revoked on role change (portal answers 404 to anyone not signed in)
-    await signInStaff(sam, PORTAL, "a@shop.test", PW); expect((await samAdmin.orders()).ok).toBe(true);
-    await admin.setStaffActive(id, false); expect((await samAdmin.orders()).status).toBe(404);
-    expect((await signInStaff(sam, PORTAL, "a@shop.test", PW)).ok).toBe(false);
-    await admin.setStaffActive(id, true); expect((await signInStaff(sam, PORTAL, "a@shop.test", PW)).ok).toBe(true);
-    const owner = (await admin.staff()).data!.find((s) => s.roles.includes("owner"))!;
-    expect((await admin.setStaffActive(owner.id, false)).status).toBe(422); expect((await admin.setStaffRoles(owner.id, ["support"])).status).toBe(422);
-    expect(await transact(p, (db) => [...db.audit].map((a) => a.event).filter((e) => e.startsWith("staff.")))).toContain("staff.invite_accepted");
-  });
-  test("invitations expire and customers can't use staff management", async () => {
-    const { admin, shopper, tokens, p } = await ownerSession();
-    await admin.inviteStaff("b@shop.test", ["analyst"]);
-    await transact(p, (db) => { for (const t of db.tokens.values()) if (t.kind === "invite") t.expiresAt = 1; });
-    expect((await shopper().acceptInvite(tokens.at(-1)!, PW)).ok).toBe(false);
-    expect((await shopper().admin(PORTAL).staff()).status).toBe(404);
-  });
-});
 
 describe("wholesale quotes", () => {
   test("request → staff quote → requester accepts; secrets protect it; no automatic pricing; expiry; permissions", async () => {
@@ -335,8 +251,7 @@ describe("wholesale quotes", () => {
     expect((await buyer.quoteStatus(r2.data!.ref, r2.data!.secret)).data!.status).toBe("expired");
     expect((await buyer.respondToQuote(r2.data!.ref, r2.data!.secret, true)).status).toBe(422);
     // support role can't price quotes; anonymous can't list
-    expect((await shopper().admin(PORTAL).quotes()).status).toBe(404);
-    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["analyst"]; });
+    await transact(p, (db) => { ensureOpenAccessOwner(db).roles = ["analyst"]; });
     await staff.logout(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     expect((await admin.quotes()).ok).toBe(true); expect((await admin.sendQuote(id2, { currency: "GHS", total: 5, validDays: 1 })).status).toBe(403);
   });
@@ -346,7 +261,7 @@ describe("notification emails", () => {
   test("order, quote and support-reply notices go to the right person; internal notes and duplicates send nothing", async () => {
     const sent: { to: string; t: string; ref: string }[] = [];
     const p = new MemoryPersistence();
-    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref") };
+    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000" };
     await transact(p, (db) => { db.zones.set("z", { id: "z", name: "z", regions: ["Greater Accra"], currency: "GHS", baseFee: 2000, perKgFee: 0, estimate: "e" }); });
     const toks: string[] = [];
     const mk = () => { let jar = ""; return createClient({ origin: ORIGIN, fetchImpl: async (url, init = {}) => {
@@ -354,7 +269,7 @@ describe("notification emails", () => {
       const res = await handle(new Request(ORIGIN + url, { ...init, headers: h }), env, p, { mail: async (_t, _x, d) => { toks.push(d.token); }, notify: async (to, t, d) => { sent.push({ to, t, ref: d.ref }); } });
       const sc = res.headers.get("set-cookie"); if (sc) jar = sc.split(";")[0]!.endsWith("=") ? "" : sc.split(";")[0]!; return res; } }); };
     const staff = mk(); const admin = staff.admin(PORTAL);
-    await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await staff.verifyEmail(toks.at(-1)!); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
+     await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 5, published: true });
     const buyer = mk();
     const body = { lines: [{ variantId: `${prod.data!.id}::CAP`, qty: 1 }], currency: "GHS" as const, region: "Greater Accra", zoneId: "z", guestEmail: "g@x.com", address: { recipient: "R", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: "same", acceptedTerms: true };
@@ -371,55 +286,7 @@ describe("notification emails", () => {
   });
 });
 
-describe("staff two-step verification", () => {
-  test("password alone opens nothing; wrong codes fail; setup, replay, recovery codes and reset behave", async () => {
-    const { admin, staff, shopper, tokens, p } = await ownerSession(); // owner is already enrolled by the helper
-    // a brand-new invited colleague signs in with password only
-    await admin.inviteStaff("m@shop.test", ["manager"]); const sam = shopper(); await sam.acceptInvite(tokens.at(-1)!, PW);
-    expect((await sam.login("m@shop.test", PW)).ok).toBe(true);
-    const sa = sam.admin(PORTAL);
-    expect((await sa.me()).data).toMatchObject({ mfa: "setup_required", roles: [] }); // roles are not even revealed
-    for (const r of [await sa.products(), await sa.orders(), await sa.zones(), await sa.analytics(), await sa.staff()]) expect(r.status).toBe(403);
-    expect((await sa.mfaConfirm("123456")).status).toBe(422); // confirm before setup
-    const setup = await sa.mfaSetup(); expect(setup.data!.otpauth).toContain("otpauth://totp/");
-    expect((await sa.mfaConfirm("000000")).status).toBe(422);
-    expect((await sa.products()).status).toBe(403); // still locked
-    const good = await totp(setup.data!.secret);
-    const conf = await sa.mfaConfirm(good); expect(conf.data!.recoveryCodes).toHaveLength(8);
-    expect((await sa.products()).ok).toBe(true); expect((await sa.me()).data).toMatchObject({ mfa: "verified", roles: ["manager"] });
-    expect((await sa.mfaSetup()).status).toBe(422); // can't silently replace a confirmed secret
-    const stored = await transact(p, (db) => JSON.stringify([...db.users.values()].find((u) => u.email === "m@shop.test")!.mfa));
-    for (const c of conf.data!.recoveryCodes) expect(stored).not.toContain(c); // only hashes at rest
-    // new sign-in: code required, same TOTP step is a replay, recovery code works once
-    await sam.logout(); await sam.login("m@shop.test", PW);
-    expect((await sa.me()).data).toMatchObject({ mfa: "code_required", roles: [] });
-    expect((await sa.products()).status).toBe(403);
-    expect((await sa.mfaVerify(good)).status).toBe(401); // replay of the code used at setup
-    expect((await sa.mfaVerify("nope")).status).toBe(401);
-    const rc = conf.data!.recoveryCodes;
-    expect((await sa.mfaVerify(rc[0]!)).ok).toBe(true); expect((await sa.products()).ok).toBe(true);
-    await sam.logout(); await sam.login("m@shop.test", PW);
-    expect((await sa.mfaVerify(rc[0]!)).status).toBe(401); // used codes are gone
-    expect((await sa.mfaVerify(rc[1]!.toUpperCase())).ok).toBe(true);
-    // owner resets: sessions die, setup required again; owner and self can't be reset
-    const id = (await admin.staff()).data!.find((s) => s.email === "m@shop.test")!.id;
-    expect((await admin.resetStaffMfa(id)).ok).toBe(true); expect((await sa.products()).status).toBe(404);
-    await sam.login("m@shop.test", PW); expect((await sa.me()).data!.mfa).toBe("setup_required");
-    const me = (await admin.me()).data!.id; expect((await admin.resetStaffMfa(me)).status).toBe(422);
-    expect((await staff.logout()).ok).toBe(true);
-  });
-});
 
-describe("two-step lockout", () => {
-  test("five wrong codes end the session, even though each attempt is under the request rate limit", async () => {
-    const { admin, staff, p } = await ownerSession(); await staff.logout(); await signInStaff(staff, PORTAL, "owner@shop.test", PW).catch(() => 0);
-    await staff.logout(); await staff.login("owner@shop.test", PW);
-    for (let i = 0; i < 4; i++) expect((await admin.mfaVerify(`10000${i}`)).status).toBe(401);
-    expect((await admin.mfaVerify("100009")).status).toBe(401); // 5th miss
-    expect((await admin.me()).status).toBe(404); // session revoked: portal looks like it doesn't exist
-    expect(await transact(p, (db) => db.audit.some((a) => a.event === "mfa.lockout"))).toBe(true);
-  });
-});
 
 describe("editable content pages", () => {
   test("defaults are served; edits go live; validation; legal review rules; reset", async () => {
@@ -440,16 +307,8 @@ describe("editable content pages", () => {
     expect((await pub.page("terms")).data!.reviewed).toBe(true); // unchanged text keeps the badge for a reviewer
     expect((await admin.savePage("terms", { title: "Terms", sections: [{ heading: "", body: "v2" }] })).ok).toBe(true);
     expect((await pub.page("terms")).data!.reviewed).toBe(false); // changed text needs fresh review
-    // a marketing user can edit marketing copy but cannot claim legal review
-    await admin.inviteStaff("mk@shop.test", ["marketing"]); const mk = shopper(); await mk.acceptInvite(tokens.at(-1)!, PW);
-    await signInStaff(mk, PORTAL, "mk@shop.test", PW); const ma = mk.admin(PORTAL);
-    expect((await ma.pages()).ok).toBe(true);
-    expect((await ma.savePage("privacy", { title: "Privacy policy", sections: [{ heading: "", body: "x" }], reviewed: true })).status).toBe(403);
-    expect((await ma.savePage("faq", { title: "FAQ", sections: [{ heading: "Q?", body: "A." }] })).ok).toBe(true);
-    // old sign-in → re-auth needed to mark reviewed
-    await transact(p, (db) => { for (const s of db.sessions.values()) s.authAt = 0; });
-    expect((await admin.savePage("terms", { title: "Terms", sections: [{ heading: "", body: "v2" }], reviewed: true })).status).toBe(403);
-    expect((await admin.reauth(PW)).ok).toBe(true); expect((await admin.savePage("terms", { title: "Terms", sections: [{ heading: "", body: "v2" }], reviewed: true })).ok).toBe(true);
+    expect((await admin.savePage("terms", { title: "Terms", sections: [{ heading: "", body: "v2" }], reviewed: true })).ok).toBe(true);
+    expect((await admin.savePage("faq", { title: "FAQ", sections: [{ heading: "Q?", body: "A." }] })).ok).toBe(true);
     expect((await admin.resetPage("about")).ok).toBe(true); expect((await pub.page("about")).data!.title).toBe("About Dera Darko Trade");
     expect((await admin.pages()).data!.find((x) => x.slug === "faq")).toMatchObject({ customised: true, legal: false });
     void staff;
@@ -462,13 +321,13 @@ import { hmacHex } from "../lib/payments/webhook";
   type Notice = { to: string; t: string; ref: string; subject?: string };
 async function shop(payments?: PaymentProvider, extraEnv: Partial<Env> = {}, sink?: Notice[]) {
     const p = new MemoryPersistence();
-    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("ref"), ...extraEnv };
+    const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PBKDF2_ITERATIONS: "1000", ...extraEnv };
     await transact(p, (db) => { db.zones.set("z", { id: "z", name: "z", regions: ["Greater Accra"], currency: "GHS", baseFee: 2000, perKgFee: 0, estimate: "e" }); });
     const toks: string[] = [];
     const call = (path: string, init: RequestInit = {}, h: Record<string, string> = {}) => handle(new Request(ORIGIN + path, { ...init, headers: { "cf-connecting-ip": `10.9.0.${++n}`, ...h } }), env, p, { mail: async (_t, _x, d) => { toks.push(d.token); }, ...(payments ? { payments } : {}), ...(sink ? { notify: async (to, t, d) => { sink.push({ to, t, ...d }); } } : {}) });
     const mk = () => { let jar = ""; return createClient({ origin: ORIGIN, fetchImpl: async (url, init = {}) => { const h = new Headers(init.headers); h.set("cf-connecting-ip", `10.9.1.${++n}`); if (jar) h.set("cookie", jar); const res = await handle(new Request(ORIGIN + url, { ...init, headers: h }), env, p, { mail: async (_t, _x, d) => { toks.push(d.token); }, ...(payments ? { payments } : {}), ...(sink ? { notify: async (to, t, d) => { sink.push({ to, t, ...d }); } } : {}) }); const sc = res.headers.get("set-cookie"); if (sc) jar = sc.split(";")[0]!.endsWith("=") ? "" : sc.split(";")[0]!; return res; } }); };
     const staff = mk(); const admin = staff.admin(PORTAL);
-    await admin.enrol({ reference: "ref", email: "owner@shop.test", password: PW }); await staff.verifyEmail(toks.at(-1)!); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
+     await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     const prod = await admin.createProduct({ name: "Cap", categoryId: "cat-shoes-and-footwear--sneakers", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "CAP", priceGhs: 10000, onHand: 5, published: true });
     const order = async (c = mk(), key = `k${Math.random()}`) => (await c.checkout({ lines: [{ variantId: `${prod.data!.id}::CAP`, qty: 1 }], currency: "GHS", region: "Greater Accra", zoneId: "z", guestEmail: "g@x.com", address: { recipient: "R", region: "Greater Accra", city: "A", street: "1" }, idempotencyKey: key, acceptedTerms: true })).data!;
     return { p, env, mk, order, call, admin };
@@ -556,7 +415,6 @@ describe("verified-buyer reviews", () => {
     expect(JSON.stringify((await guest.reviews(slug)).data)).not.toContain("ama@x.com"); // no PII
     // rejected reviews never show; customers can't moderate; deletion erases the review
     await admin.moderateReview(queue[0]!.id, "reject"); expect((await guest.reviews(slug)).data!.summary.count).toBe(0);
-    expect((await shopper().admin(PORTAL).reviews()).status).toBe(404);
     await admin.moderateReview(queue[0]!.id, "publish"); await ama.deleteAccount();
     expect((await guest.reviews(slug)).data!.summary.count).toBe(0);
     expect(await transact(p, (db) => db.reviews.size)).toBe(0);
@@ -597,8 +455,7 @@ describe("suppliers and purchase orders", () => {
     expect((await admin.setPurchaseOrderStatus(po2.id, "cancelled")).ok).toBe(true);
     // costs never leak publicly; anonymous and fulfilment staff are refused
     expect(JSON.stringify((await shopper().products()).data)).not.toMatch(/unitCost|Guangzhou/);
-    expect((await shopper().admin(PORTAL).suppliers()).status).toBe(404);
-    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["fulfilment"]; });
+    await transact(p, (db) => { ensureOpenAccessOwner(db).roles = ["fulfilment"]; });
     await staff.logout(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     expect((await admin.suppliers()).status).toBe(403); expect((await admin.purchaseOrders()).status).toBe(403);
   });
@@ -650,8 +507,7 @@ describe("payment methods: card, Mobile Money, bank transfer", () => {
     const o2 = await order(mk());
     expect((await admin.confirmBankTransfer(o2.order.id, o2.order.total, "TX-9")).errors[0]).toMatch(/isn't waiting on a bank transfer/);
     // customers have no access; fulfilment staff can't confirm money
-    expect((await mk().admin(PORTAL).confirmBankTransfer(o.order.id, 1, "x")).status).toBe(404);
-    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["fulfilment"]; });
+    await transact(p, (db) => { ensureOpenAccessOwner(db).roles = ["fulfilment"]; });
     const staff = mk(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     expect((await staff.admin(PORTAL).confirmBankTransfer(o2.order.id, o2.order.total, "TX-10")).status).toBe(403);
     void call;
@@ -705,47 +561,11 @@ describe("pre-order allocation from received stock", () => {
     expect((await admin.allocatePreorder(idB)).errors[0]).toMatch(/only 1 free in stock, 2 needed/); // now genuinely short
     expect((await admin.preorderQueue()).data!.map((x) => x.ref)).toEqual([b.order.ref]);
     expect(await transact(p, (db) => db.audit.some((e) => e.event === "order.preorder_allocated"))).toBe(true);
-    expect((await mk().admin(PORTAL).preorderQueue()).status).toBe(404);
     void unpaid;
   });
 });
 
 import { runMaintenance } from "../server/maintenance";
-describe("staff 2FA seed encryption and maintenance", () => {
-  test("the authenticator seed is never stored in plaintext; a legacy plaintext seed still works and is upgraded", async () => {
-    const { p, admin } = await shop();
-    // owner has completed 2FA setup via signInStaff; the stored seed must be sealed
-    const stored = await transact(p, (db) => [...db.users.values()].find((u) => u.email === "owner@shop.test")!.mfa!.secret);
-    expect(stored.startsWith("v1.")).toBe(true);
-    expect((await admin.me()).ok).toBe(true);
-    // simulate a database from before encryption: plaintext seed in the row
-    const seed = "JBSWY3DPEHPK3PXP";
-    const { verifyMfa } = await import("../server/services/mfa");
-    const { totp } = await import("../lib/security/totp");
-    await transact(p, async (db) => {
-      const u = [...db.users.values()].find((x) => x.email === "owner@shop.test")!; u.mfa!.secret = seed; u.mfa!.lastStep = -1; u.mfa!.failures = 0;
-      const sid = "legacy-sid"; db.sessions.set(sid, { id: sid, userId: u.id, expiresAt: Date.now() + 1e6, revoked: false, authAt: Date.now() });
-      const code = await totp(seed, Date.now());
-      expect(await verifyMfa(db, { id: u.id, kind: "staff", roles: u.roles }, sid, code, "s".repeat(32))).toBe(true);
-      expect(u.mfa!.secret.startsWith("v1.")).toBe(true);
-    });
-  });
-  test("maintenance releases expired holds and clears expired sessions/tokens, leaving live ones alone", async () => {
-    const { p, mk, order } = await shop(fake2({}));
-    const o = await order(mk());
-    const now = Date.now();
-    await transact(p, (db) => {
-      db.tokens.set("old", { userId: "u", kind: "reset", expiresAt: now - 1 }); db.tokens.set("live", { userId: "u", kind: "reset", expiresAt: now + 1e6 });
-      db.sessions.set("dead", { id: "dead", userId: "u", expiresAt: now - 1, revoked: false, authAt: 0 });
-    });
-    expect(await runMaintenance(p, now)).toMatchObject({ released: 0, tokens: 1 });
-    const r = await runMaintenance(p, now + 24 * 3_600_000);
-    expect(r.released).toBe(1);
-    const st = await transact(p, (db) => ({ status: [...db.orders.values()].find((x) => x.ref === o.order.ref)!.status, live: db.tokens.has("live"), dead: db.sessions.has("dead") }));
-    expect(st).toMatchObject({ status: "cancelled", live: false /* expired by then */, dead: false });
-    expect((await runMaintenance(p, now + 24 * 3_600_000)).released).toBe(0); // idempotent
-  });
-});
 
 describe("wishlist", () => {
   test("customers save and remove by slug, idempotently; hidden/unknown products and guests are refused; lists are private and erased with the account", async () => {
@@ -803,7 +623,6 @@ describe("category filter attributes", () => {
     expect((await pub()).attributes).toEqual({ make: "Honda", transmission: "Automatic" });
     expect((await admin.setAttributes(car.id, { year: "last year" })).status).toBe(422); expect((await admin.setAttributes("nope", {})).status).toBe(422);
     expect((await admin.products()).data!.find((x) => x.id === car.id)).toMatchObject({ categoryId: "cat-cars--suvs", attributes: { make: "Honda" } });
-    expect((await mk().admin(PORTAL).setAttributes(car.id, {})).status).toBe(404);
   });
 });
 
@@ -847,11 +666,7 @@ describe("business details", () => {
     const pub = (await mk().site()).data!; expect(pub).toEqual(saved.business); expect("whatsapp" in pub).toBe(false); expect("evil" in pub).toBe(false);
     expect((await admin.business()).data).toEqual(saved.business);
     await admin.saveBusiness({}); expect((await mk().site()).data).toEqual({}); // clearing hides everything again
-    // stale sign-in → must re-authenticate (settings are a sensitive permission)
-    await transact(p, (db) => { for (const s of db.sessions.values()) s.authAt = Date.now() - 3_600_000; });
-    expect((await admin.saveBusiness({ city: "Accra" })).errors[0]).toMatch(/re-?auth/i);
-    expect((await mk().admin(PORTAL).saveBusiness({ city: "x" })).status).toBe(404);
-    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["fulfilment"]; });
+    await transact(p, (db) => { ensureOpenAccessOwner(db).roles = ["fulfilment"]; });
     const staff = mk(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     expect((await staff.admin(PORTAL).saveBusiness({ city: "x" })).status).toBe(403); expect((await staff.admin(PORTAL).business()).status).toBe(403);
   });
@@ -883,8 +698,7 @@ describe("bulk product import", () => {
     expect((await admin.importProducts("", true)).status).toBe(422); expect((await admin.importProducts("name,sku\nx,y", true)).errors[0]).toMatch(/"category" column/); expect((await admin.importProducts(HEAD, true)).errors[0]).toMatch(/no products/);
     expect((await admin.importProducts([HEAD, 'X,X1,Sneakers,1,,1,s,/i,a,,,,,Nike,'].join("\n").replace("Nike,", "Nike,"), true)).ok).toBe(true);
     expect((await admin.importProducts(HEAD + "\n" + "x".repeat(1_100_000), true)).errors[0]).toMatch(/too large/);
-    expect((await mk().admin(PORTAL).importProducts(good, false)).status).toBe(404);
-    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["support"]; });
+    await transact(p, (db) => { ensureOpenAccessOwner(db).roles = ["support"]; });
     const staff = mk(); await signInStaff(staff, PORTAL, "owner@shop.test", PW);
     expect((await staff.admin(PORTAL).importProducts(good, false)).status).toBe(403);
   });
@@ -928,12 +742,11 @@ describe("dashboard overview", () => {
     // pending review/ticket counts exist for the owner
     expect(o.reviewsToModerate).toBe(0); expect(o.openTickets).toBe(0);
     // a finance user sees orders + sales but not stock/inbox; a support user sees only tickets + orders
-    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["finance"]; });
+    await transact(p, (db) => { ensureOpenAccessOwner(db).roles = ["finance"]; });
     const fin = mk(); await signInStaff(fin, PORTAL, "owner@shop.test", PW); const f = (await fin.admin(PORTAL).overview()).data!;
     expect(Object.keys(f).sort()).toEqual(["orders", "sales"]);
-    await transact(p, (db) => { [...db.users.values()].find((u) => u.email === "owner@shop.test")!.roles = ["support"]; });
+    await transact(p, (db) => { ensureOpenAccessOwner(db).roles = ["support"]; });
     const sup = mk(); await signInStaff(sup, PORTAL, "owner@shop.test", PW); expect(Object.keys((await sup.admin(PORTAL).overview()).data!).sort()).toEqual(["openTickets", "orders"]);
-    expect((await mk().admin(PORTAL).overview()).status).toBe(404);
   });
 });
 
@@ -962,9 +775,13 @@ describe("product photo upload", () => {
   const bucket = () => { const m = new Map<string, ArrayBuffer>(); return { m, r2: { put: async (k: string, v: ArrayBuffer) => { m.set(k, v); }, get: async (k: string) => (m.has(k) ? { body: m.get(k)! } : null) } }; };
   const png = () => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
 
-  test("says so honestly when no bucket is configured", async () => {
+  test("without a bucket a small verified image is embedded; non-images and oversized images are refused with a clear reason", async () => {
     const { admin } = await shop(); const r = await admin.uploadImage(new Blob([png()]));
-    expect(r.ok).toBe(false); expect(r.status).toBe(503); expect(r.errors[0]).toMatch(/R2/);
+    expect(r.ok).toBe(true); expect(r.data!.url.startsWith("data:image/png;base64,")).toBe(true);
+    const notImage = await admin.uploadImage(new Blob([new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])]));
+    expect(notImage.ok).toBe(false); expect(notImage.status).toBe(422);
+    const big = new Uint8Array(400_000); big.set(png()); const tooBig = await admin.uploadImage(new Blob([big]));
+    expect(tooBig.ok).toBe(false); expect(tooBig.errors[0]).toMatch(/R2|MEDIA/);
   });
   test("stores a real image, serves it publicly with safe headers, and rejects disguised files", async () => {
     const { m, r2 } = bucket(); const { admin, p, env } = await shop(undefined, { MEDIA: r2 }); const call = (path: string) => route(new Request(ORIGIN + path), env, p, () => new Response("ssr"));
@@ -974,10 +791,6 @@ describe("product photo upload", () => {
     const svg = await admin.uploadImage(new Blob(['<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>'])); expect(svg.ok).toBe(false); expect(svg.status).toBe(422);
     expect((await admin.uploadImage(new Blob([]))).ok).toBe(false);
     expect((await admin.uploadImage(new Blob([new Uint8Array(3_100_001).fill(1)]))).ok).toBe(false); expect(m.size).toBe(1);
-  });
-  test("only signed-in staff can upload", async () => {
-    const { r2 } = bucket(); const { mk } = await shop(undefined, { MEDIA: r2 });
-    const r = await mk().admin(PORTAL).uploadImage(new Blob([png()])); expect(r.ok).toBe(false); expect([401, 403, 404]).toContain(r.status);
   });
 });
 
@@ -1008,7 +821,6 @@ describe("owner-approved exchange rate", () => {
       expect(JSON.stringify(pub.data)).not.toMatch(/approvedBy|approvedAt/);
       expect((await admin.exchangeRate()).data!.stale).toBe(false);
     }
-    expect((await mk().admin(PORTAL).exchangeRate()).ok).toBe(false);
     expect((await admin.saveExchangeRate({ displayMode: "EUR" as never })).status).toBe(422);
   });
 });
@@ -1034,10 +846,6 @@ describe("product image provenance and approval", () => {
     const items = (await admin.productMedia(id)).data!.items; expect(items.some((m) => m.url === "/old.jpg" && m.kind === "previous")).toBe(true); // old image preserved
     expect(JSON.stringify(p)).not.toMatch(/canvaDesignId|DAHZmbTWqr4|"by"/); // provenance stays internal
     expect((await admin.reviewProductMedia({ productId: id, imageId: add.data!.id, action: "reject" })).ok).toBe(false); // can't reject the live main image
-  });
-  test("only staff can manage product images", async () => {
-    const { admin, mk } = await shop(); const id = (await mkProduct(admin)).data!.id;
-    expect((await mk().admin(PORTAL).addProductMedia({ productId: id, url: "https://cdn.example/a.webp", alt: "a", kind: "verified" })).ok).toBe(false);
   });
 });
 

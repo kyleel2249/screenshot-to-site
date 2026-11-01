@@ -1,19 +1,17 @@
 import { describe, expect, test } from "vitest";
 import { SEED_CATEGORIES } from "../lib/domain/categories";
 import { hmacHex } from "../lib/payments/webhook";
-import { sha256Hex } from "../lib/security/crypto";
-import { totp } from "../lib/security/totp";
 import { handle, type Env } from "../server/api";
 import { MemoryPersistence, transact } from "../server/persistence/transact";
 
 const ORIGIN = "https://shop.test";
 const PW = "Str0ng!Passw0rd#";
-const PORTAL = "/ops-k7q2m9x4p1z8";
+const PORTAL = "/dera-owner-console";
 let ipN = 0;
 
 async function world() {
   const p = new MemoryPersistence();
-  const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PAYMENT_WEBHOOK_SECRET: "whsec", PBKDF2_ITERATIONS: "1000", ADMIN_PORTAL_PATH: PORTAL, ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("test-ref") };
+  const env: Env = { SESSION_SECRET: "s".repeat(32), SITE_ORIGIN: ORIGIN, PAYMENT_WEBHOOK_SECRET: "whsec", PBKDF2_ITERATIONS: "1000" };
   await transact(p, (db) => { db.categories = [...SEED_CATEGORIES]; db.zones.set("z", { id: "z", name: "Accra", regions: ["Greater Accra"], currency: "GHS", baseFee: 2000, perKgFee: 0, estimate: "1–3 days (estimate)" }); });
   const mails: { to: string; template: string; token: string }[] = [];
   const deps = { mail: async (to: string, template: string, d: { token: string }) => { mails.push({ to, template, token: d.token }); } };
@@ -30,20 +28,8 @@ async function world() {
 }
 type W = Awaited<ReturnType<typeof world>>;
 
-async function ownerSession(w: W) {
-  const e = await w.call(`${PORTAL}/api/enrol`, { body: { reference: "test-ref", email: "owner@shop.test", password: PW } });
-  expect(e.status).toBe(200);
-  const verify = w.mails.find((m) => m.template === "owner_verify")!;
-  // staff email verification uses the same token store
-  expect((await w.call("/api/verify-email", { body: { token: verify.token } })).status).toBe(200);
-  const l = await w.call("/api/login", { body: { email: "owner@shop.test", password: PW } });
-  expect(l.status).toBe(200);
-  const cookie = w.cookieFrom(l);
-  const set = await w.call(`${PORTAL}/api/mfa/setup`, { body: {}, cookie });
-  const conf = await w.call(`${PORTAL}/api/mfa/confirm`, { body: { code: await totp(set.data.secret) }, cookie });
-  expect(conf.status).toBe(200);
-  return cookie;
-}
+/** The dashboard is open (no login), so there is no session: requests simply carry no cookie. Kept as a function so call sites read the same. */
+async function ownerSession(_w: W) { return undefined as unknown as string; }
 const newProd = (o: Record<string, unknown> = {}) => ({ name: "Test Phone", categoryId: "cat-phones-and-accessories--mobile-phones", shortDescription: "s", image: "/i.jpg", imageAlt: "a", sku: "PH1", priceGhs: 100000, priceUsd: 6500, onHand: 3, published: true, ...o });
 
 describe("transport security", () => {
@@ -100,25 +86,21 @@ describe("customer flow over HTTP", () => {
   });
 });
 
-describe("admin portal", () => {
-  test("enrolment works once; wrong reference fails; probes get 404; customers cannot use admin API", async () => {
+describe("open dashboard", () => {
+  test("works with no sign-in; customers and other paths get nothing special; unknown admin paths 404", async () => {
     const w = await world();
-    expect((await w.call(`${PORTAL}/api/enrol`, { body: { reference: "wrong", email: "o@x.com", password: PW } })).status).toBe(404);
-    const ck = await ownerSession(w);
-    expect((await w.call(`${PORTAL}/api/enrol`, { body: { reference: "test-ref", email: "z@x.com", password: PW } })).status).toBe(404); // closed
-    expect((await w.call(`${PORTAL}/api/products`, { body: newProd() })).status).toBe(404); // no session
-    expect((await w.call(`/admin/api/products`, { body: newProd(), cookie: ck })).status).toBe(404); // wrong path
-    expect((await w.call(`${PORTAL}/api/products`, { body: newProd(), cookie: ck })).status).toBe(201);
-    await w.call("/api/register", { body: { email: "c@x.com", password: PW, firstName: "C", lastName: "D", acceptTerms: true } });
-    const cc = w.cookieFrom(await w.call("/api/login", { body: { email: "c@x.com", password: PW } }));
-    expect((await w.call(`${PORTAL}/api/products`, { body: newProd({ sku: "X" }), cookie: cc })).status).toBe(404);
+    expect((await w.call(`${PORTAL}/api/me`)).data).toMatchObject({ roles: ["owner"], storage: "memory" });
+    expect((await w.call(`${PORTAL}/api/products`, { body: newProd() })).status).toBe(201);
+    expect((await w.call(`/admin/api/products`, { body: newProd({ sku: "Y" }) })).status).toBe(404);
+    expect((await w.call(`/ops-k7q2m9x4p1z8/api/products`)).status).toBe(404);
+    for (const gone of ["/enrol", "/mfa/setup", "/mfa/verify", "/password/change", "/staff", "/staff/invite"]) expect((await w.call(`${PORTAL}/api${gone}`, { body: {} })).status).toBe(404);
+    expect((await w.call("/api/staff/accept-invite", { body: {} })).status).toBe(404);
   });
-  test("portal is disabled entirely when ADMIN_PORTAL_PATH is missing or contains 'admin'", async () => {
+  test("the built-in owner can never sign in, and customer sign-in is unaffected", async () => {
     const w = await world();
-    w.env.ADMIN_PORTAL_PATH = "/admin-portal-abcdef";
-    expect((await w.call("/admin-portal-abcdef/api/enrol", { body: { reference: "test-ref", email: "o@x.com", password: PW } })).status).toBe(404);
-    delete w.env.ADMIN_PORTAL_PATH;
-    expect((await w.call(`${PORTAL}/api/enrol`, { body: { reference: "test-ref", email: "o@x.com", password: PW } })).status).toBe(404);
+    await w.call(`${PORTAL}/api/me`);
+    for (const pw of ["", "disabled", PW]) expect((await w.call("/api/login", { body: { email: "owner@open.local", password: pw } })).status).toBe(401);
+    expect(await transact(w.p, (db) => db.sessions.size)).toBe(0);
   });
   test("dashboard changes propagate to the public storefront immediately", async () => {
     const w = await world(); const ck = await ownerSession(w);
@@ -181,15 +163,10 @@ describe("checkout, webhook and refunds end to end", () => {
     expect((await w.call("/api/orders", { cookie: b })).data).toEqual([]);
     expect((await w.call("/api/orders")).status).toBe(401);
   });
-  test("refund needs permission, recent re-auth, and respects order currency", async () => {
+  test("refund respects order currency and the amount paid, and is audited", async () => {
     const w = await world(); const ck = await ownerSession(w);
     const prod = await w.call(`${PORTAL}/api/products`, { body: newProd(), cookie: ck }); const v = `${prod.data.id}::PH1`;
     const c = await checkout(w, v); await pay(w, c.data.order.ref, 102000, "e3");
-    // age the session's authentication beyond the 10-minute window
-    await transact(w.p, (db) => { for (const s of db.sessions.values()) s.authAt -= 3600_000; });
-    expect((await w.call(`${PORTAL}/api/refunds`, { body: { orderId: c.data.order.id, amount: 1000 }, cookie: ck })).status).toBe(403);
-    expect((await w.call(`${PORTAL}/api/reauth`, { body: { password: "wrong" }, cookie: ck })).status).toBe(401);
-    expect((await w.call(`${PORTAL}/api/reauth`, { body: { password: PW }, cookie: ck })).status).toBe(200);
     const r = await w.call(`${PORTAL}/api/refunds`, { body: { orderId: c.data.order.id, amount: 1000 }, cookie: ck });
     expect(r.data).toMatchObject({ amount: 1000, currency: "GHS" });
     const over = await w.call(`${PORTAL}/api/refunds`, { body: { orderId: c.data.order.id, amount: 999999 }, cookie: ck });

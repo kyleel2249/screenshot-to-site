@@ -20,8 +20,7 @@ No sample products, prices, stock, reviews, ratings, orders or delivery rules. U
 |---|---|
 | Server guest API, session/CSRF/IDOR/rate-limit/checkout/tracking/returns | **Tested**: `src/test/guest.test.ts` (37 tests) |
 | Pure dashboard helpers | **Tested**: `src/test/dashboard-lib.test.ts` (12 tests) |
-| Full suite with `STAFF_OPEN_ACCESS=false` | 251 pass; the only error is the missing `@tanstack/react-query` package (not installable here) |
-| Full suite with `STAFF_OPEN_ACCESS=true` (current) | 202 pass / 50 fail: the failing tests assert the locked-down admin and are expected to fail while the temporary open admin is on |
+| Full suite (after merging the upstream open-admin change) | 240 pass; the only error is the missing `@tanstack/react-query` package (not installable here) |
 | UI components and route | **Syntax-checked only** (`bun build --no-bundle`). No `vite build`, type-check, browser, screenshot, Lighthouse, e2e or deployment was possible: the npm registry is unreachable from this environment |
 | `routeTree.gen.ts` | Hand-edited to add `/dashboard`; regenerate with `vite build`/dev server |
 
@@ -29,4 +28,4 @@ No sample products, prices, stock, reviews, ratings, orders or delivery rules. U
 No photo upload on return requests; guests cannot post reviews (the existing review system needs a delivered-order customer); no tax or handling charges exist; coupon codes are not listed publicly; email notices need the mail key; no staff-portal screen yet to enter shipment details (`setShipment` service exists and is tested).
 
 ## Owner actions
-Set `SESSION_SECRET` and `SITE_ORIGIN`; publish delivery zones; configure payment keys and the mail key; add real products with approved prices; set `STAFF_OPEN_ACCESS = false` in `src/lib/security/open-access.ts` before launch; run `bun install && bun run build` and fix anything the type-checker reports.
+Set `SESSION_SECRET` and `SITE_ORIGIN`; publish delivery zones; configure payment keys and the mail key; add real products with approved prices; run `bun install && bun run build` and fix anything the type-checker reports.

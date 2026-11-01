@@ -8,7 +8,6 @@ import { runMaintenance } from "../server/maintenance";
 import { createProduct } from "../server/services/catalog-admin";
 import { GUEST_SESSION_TTL_MS } from "../server/services/guest";
 import type { Actor } from "../server/rbac";
-import { STAFF_OPEN_ACCESS } from "../lib/security/open-access";
 
 const ORIGIN = "https://shop.test";
 const CAT = "cat-shoes-and-footwear--sneakers";
@@ -394,7 +393,7 @@ describe("rate limits, pruning, and the other APIs still work", () => {
     const cat = await b.call("/api/products");
     expect(cat.status).toBe(200); expect(cat.data.map((x: any) => x.name).sort()).toEqual(["Item BELT", "Item CAP", "Item SHOE"]);
     // While the temporary open-access switch is on the admin API answers without a login; with it off the portal path is a plain 404 to anonymous visitors.
-    expect((await b.call("/dera-owner-console/api/products")).status).toBe(STAFF_OPEN_ACCESS ? 200 : 404);
+    expect((await b.call("/dera-owner-console/api/products")).status).toBe(200);
     expect((await b.call("/api/nope")).status).toBe(404);
   });
 });

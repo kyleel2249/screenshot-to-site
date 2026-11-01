@@ -4,7 +4,7 @@ import { sha256Hex } from "../lib/security/crypto";
 import { MemoryDb } from "../server/db";
 import { Forbidden, type Actor } from "../server/rbac";
 import { adjustStock, archiveProduct, categoryAdmin, createProduct, setAvailability, setPrices, setPublishedState, ValidationError } from "../server/services/catalog-admin";
-import { adminStoreFor, authenticate, enrolOwner, login, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "../server/services/auth";
+import { authenticate, login, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "../server/services/auth";
 import { completeRefund, getOrderForCustomer, handleVerifiedPayment, placeOrder, releaseExpired, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "../server/services/orders";
 
 const IT = 1000; // fast PBKDF2 for tests
@@ -181,18 +181,5 @@ describe("auth", () => {
     for (let i = 0; i < 5; i++) await login(db, { email: "a@x.com", password: "bad", secret: SECRET });
     const locked = await login(db, { email: "a@x.com", password: PW + "9", secret: SECRET });
     expect(locked.ok).toBe(false);
-  });
-  test("owner enrolment works once, produces an owner with MFA required, then is closed", async () => {
-    const env = { ADMIN_BOOTSTRAP_REF_HASH: await sha256Hex("test-ref") };
-    const store = adminStoreFor(db);
-    const r1 = await enrolOwner(store, env, { reference: "test-ref", email: "o@x.com", password: PW, clientKey: "k1" });
-    expect(r1.ok).toBe(true);
-    const owner1 = [...db.users.values()][0]!;
-    expect(owner1).toMatchObject({ kind: "staff", roles: ["owner"], mfaRequired: true, emailVerified: false });
-    expect(await enrolOwner(store, env, { reference: "test-ref", email: "z@x.com", password: PW, clientKey: "k2" })).toEqual({ ok: false, code: "setup_closed" });
-    expect(db.users.size).toBe(1);
-    // unverified staff cannot log in
-    expect((await login(db, { email: "o@x.com", password: PW, secret: SECRET })).ok).toBe(false);
-    expect(JSON.stringify(db.audit)).not.toContain("test-ref");
   });
 });
