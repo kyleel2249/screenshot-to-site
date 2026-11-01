@@ -1,269 +1,577 @@
 /**
- * TEMP open-access API: admin dashboard needs no login.
- * Supports catalogue list/create/publish/seed + product image upload.
+ * HTTP API (Web-standard Request → Response). Mount at /api/* in a Cloudflare Worker / Pages Function / TanStack server route.
+ * Security model:
+ *  - session cookie: HttpOnly, Secure, SameSite=Strict; state-changing calls also require a same-origin Origin header (CSRF)
+ *  - every privileged route authenticates server-side and checks RBAC; knowing a URL grants nothing
+ *  - the admin API lives under /dera-owner-console and is OPEN (no login): the owner asked for direct dashboard access
+ *  - payment webhooks are accepted only with a valid HMAC signature over the raw body
  */
-import { STAFF_OPEN_ACCESS } from "../lib/security/open-access";
-import { resolvePortalPath } from "../lib/security/enrolment";
+import { labelOf } from "../lib/order-labels";
+import { overview } from "./services/overview";
+import { sniffImage, storeImage, type R2Like } from "./media";
+import { addMedia, listMedia, publicMedia, reviewMedia } from "./services/media-admin";
+import { importProducts } from "./services/import";
+import { cleanBusiness } from "../lib/business";
+import { cleanRate, isStale, rateAgeDays } from "../lib/domain/exchange";
+import { sellableQty, effectiveAvailability, activePromoLabels } from "../lib/domain/status";
+import type { Currency } from "../lib/domain/money";
+import { verifyWebhook } from "../lib/payments/webhook";
+import { NO_STORE } from "../lib/security/headers";
+import { RateLimiter, verifySession } from "../lib/security/crypto";
+import { deleteZone, listDiscounts, listZones, saveDiscount, saveZone, setDiscountActive } from "./services/promotions";
+import { OPEN_ACCESS_PORTAL_PATH } from "../lib/security/open-access";
+import { openAccessActor } from "./open-access-actor";
 import { SEED_CATEGORIES } from "../lib/domain/categories";
 import type { MemoryDb } from "./db";
-import type { Persistence } from "./persistence/transact";
-import { transact } from "./persistence/transact";
-import { Forbidden, requirePermission } from "./rbac";
-import type { R2Like } from "./media";
-import { storeImage, serveImage, MEDIA_MAX_BYTES, sniffImage } from "./media";
-import { openAccessActor } from "./open-access-actor";
-import { createProduct, setPublishedState, ValidationError } from "./services/catalog-admin";
+import { can, Forbidden, requirePermission, type Actor } from "./rbac";
+import { ConflictError, MemoryPersistence, transact, type Persistence } from "./persistence/transact";
+import { getCart, saveCart, setWishlist, addAddress, deleteMyAccount, exportMyData, getProfile, listAddresses, updateProfile } from "./services/account";
+import { authenticate, login, logout, registerCustomer, requestPasswordReset, resetPassword, verifyEmail } from "./services/auth";
+import { exportOrdersCsv, funnel, revenue, track } from "./services/analytics";
+import { createPurchaseOrder, listPurchaseOrders, listSuppliers, receivePurchaseOrder, saveSupplier, setPurchaseOrderStatus } from "./services/purchasing";
+import { listForModeration, listPublished, moderate, submitReview, summary } from "./services/reviews";
+import { getPage, listPages, resetPage, savePage } from "./services/content";
+import { isMethod, providerFromEnv, type PaymentMethod, type PaymentProvider } from "../lib/payments/provider";
+import { listQuotes, lookupQuote, requestQuote, respondToQuote, sendQuote } from "./services/quotes";
+import { listTickets, myTickets, openTicket, setTicketStatus, staffReply } from "./services/support";
+import { adjustStock, categoryAdmin, createProduct, setAvailability, setProductAttributes, setPrices, setPublishedState, ValidationError, type NewProduct } from "./services/catalog-admin";
+import { allocatePreorder, preorderQueue, beginBankTransfer, completeRefund, confirmBankTransfer, getOrderForCustomer, handleVerifiedPayment, listOrdersForCustomer, orderForPayment, placeOrder, requestCancellation, requestRefund, staffUpdateStatus, trackOrder } from "./services/orders";
+import type { OrderStatus } from "../lib/domain/commerce";
 import type { Availability } from "../lib/domain/status";
 
 export interface Env {
-  SESSION_SECRET: string; SITE_ORIGIN: string; ADMIN_BOOTSTRAP_REF_HASH?: string; ADMIN_PORTAL_PATH?: string;
-  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string;
-  BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string;
-  DATA_ENCRYPTION_KEY?: string; CSP_MODE?: string; MAINTENANCE_KEY?: string; MEDIA?: R2Like;
-  EXCHANGE_RATE_GHS_PER_USD?: string; EXCHANGE_RATE_SOURCE?: string; EXCHANGE_RATE_DATE?: string;
-  DEV_OPEN_ADMIN?: string;
+  SESSION_SECRET: string; SITE_ORIGIN: string; 
+  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string; BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string; CSP_MODE?: string; MAINTENANCE_KEY?: string; MEDIA?: R2Like; EXCHANGE_RATE_GHS_PER_USD?: string; EXCHANGE_RATE_SOURCE?: string; EXCHANGE_RATE_DATE?: string;
 }
 export type NoticeTemplate = "order_received" | "order_update" | "payment_received" | "quote_ready" | "ticket_reply";
 export interface Deps {
-  payments?: unknown;
+  /** Payment provider; defaults to the one configured by PAYMENT_PROVIDER / PAYMENT_SECRET_KEY. Injectable for tests. */
+  payments?: PaymentProvider | undefined;
+  /** Informational notices. Carry a reference and a subject line only — never tokens, secrets or message bodies. */
   notify?: ((to: string, template: NoticeTemplate, data: { ref: string; subject?: string }) => Promise<void>) | undefined;
-  mail?: ((to: string, template: "verify_email" | "password_reset" | "owner_verify" | "staff_invite", data: { token: string }) => Promise<void>) | undefined;
+  /** Outbound email. Tokens are only ever delivered here, never returned in an HTTP response. */
+  mail?: ((to: string, template: "verify_email" | "password_reset", data: { token: string }) => Promise<void>) | undefined;
+}
+type Body = Record<string, unknown>;
+
+const limiters = { auth: new RateLimiter(10, 60_000), general: new RateLimiter(120, 60_000) };
+const COOKIE = "ddt_session";
+
+const json = (data: unknown, status = 200, extra: Record<string, string> = {}) =>
+  new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff", ...NO_STORE, ...extra } });
+const notFound = () => json({ error: "Not found" }, 404);
+const str = (b: Body, k: string) => (typeof b[k] === "string" ? (b[k] as string) : "");
+const num = (b: Body, k: string) => (typeof b[k] === "number" ? (b[k] as number) : NaN);
+const bool = (b: Body, k: string) => b[k] === true;
+
+function cookieOf(req: Request, name: string): string | undefined {
+  for (const part of (req.headers.get("cookie") ?? "").split(";")) { const [k, ...v] = part.trim().split("="); if (k === name) return v.join("="); }
+  return undefined;
+}
+const sessionCookie = (token: string, maxAge: number) => `${COOKIE}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`;
+
+async function readBody(req: Request, limit = 200_000): Promise<Body | null> {
+  const declared = Number(req.headers.get("content-length") ?? 0);
+  if (declared > limit) return null; // refuse before reading
+  const text = await req.text();
+  if (text.length > limit) return null;
+  try { const v: unknown = JSON.parse(text || "{}"); return v && typeof v === "object" && !Array.isArray(v) ? (v as Body) : null; } catch { return null; }
 }
 
-export function publicProducts(db: MemoryDb, _now = new Date()) {
-  const out: unknown[] = [];
+/** Order statuses worth emailing the customer about. Internal steps (processing, preparing) stay quiet. */
+const NOTIFY_STATUSES = new Set(["ready_for_pickup", "dispatched", "out_for_delivery", "delivered", "delivery_attempted", "cancelled", "returned", "refunded", "partially_refunded"]);
+const emailOfOrder = (db: MemoryDb, o: { guestEmail?: string; userId?: string }) => o.guestEmail ?? (o.userId ? db.users.get(o.userId)?.email : undefined);
+
+const orderView = (o: { id: string; ref: string; status: string; currency: string; total: number; subtotal: number; discount: number; shipping: number; hasPreorder: boolean; createdAt: number; reservedUntil?: number; paymentMethod?: string; items: { name: string; qty: number; unit: number; line: number; mode: string }[]; history: { to: string; at: number }[] }) =>
+  ({ id: o.id, ref: o.ref, status: o.status, currency: o.currency, subtotal: o.subtotal, discount: o.discount, shipping: o.shipping, total: o.total, hasPreorder: o.hasPreorder, createdAt: o.createdAt, payBy: o.status === "pending_payment" && (o.reservedUntil ?? 0) > Date.now() ? o.reservedUntil : null, paymentMethod: o.paymentMethod ?? null, items: o.items.map((i) => ({ name: i.name, qty: i.qty, unit: i.unit, line: i.line, mode: i.mode })), history: o.history.map((h) => ({ to: h.to, at: h.at })) });
+
+/** Public catalogue straight from the database: never exposes costs, exact stock (unless limited-stock display is on), or unpublished items. */
+/** The approved rate: one saved in the dashboard wins; otherwise the owner's deployment setting (EXCHANGE_RATE_*), if valid. Never invented. */
+export function effectiveRate(db: MemoryDb, env: Env) {
+  if (db.exchangeRate) return { rate: db.exchangeRate, fromConfig: false };
+  if (!env.EXCHANGE_RATE_GHS_PER_USD) return { rate: null, fromConfig: false };
+  const c = cleanRate({ ghsPerUsd: env.EXCHANGE_RATE_GHS_PER_USD, source: env.EXCHANGE_RATE_SOURCE ?? "Owner-set rate", effectiveDate: env.EXCHANGE_RATE_DATE ?? "" }, Date.now(), "deployment-config");
+  return c.ok ? { rate: c.rate, fromConfig: true } : { rate: null, fromConfig: false };
+}
+
+export function publicProducts(db: MemoryDb, now = new Date()) {
+  const out = [];
   for (const p of db.products.values()) {
     if (p.archived) continue;
+    const cat = db.categories.find((c) => c.id === p.categoryId); // hiding a category hides its products from the public list
+    if (cat && (!cat.published || (cat.parentId && db.categories.find((c) => c.id === cat.parentId)?.published === false))) continue;
     const v = [...db.variants.values()].find((x) => x.productId === p.id);
-    if (!v || !v.published) continue;
+    if (!v || !v.published || (v.publishAt && new Date(v.publishAt) > now)) continue;
+    const hasSale = !!v.salePrice;
     out.push({
-      slug: p.slug, name: p.name, categoryId: p.categoryId, createdAt: p.createdAt, shortDescription: p.shortDescription,
-      image: p.image, imageAlt: p.imageAlt, availability: v.availability, labels: [], price: v.price, salePrice: v.salePrice ?? null,
-      variantId: v.id, attributes: p.attributes ?? {},
+      slug: p.slug, name: p.name, categoryId: p.categoryId, createdAt: p.createdAt, shortDescription: p.shortDescription, image: p.image, imageAlt: p.imageAlt,
+      availability: effectiveAvailability(v), labels: activePromoLabels(p.promo, v, { ...(p.showLimitedBelow !== undefined ? { showLimitedBelow: p.showLimitedBelow } : {}), hasValidSale: hasSale }, now),
+      price: v.price, salePrice: v.salePrice ?? null, variantId: v.id, rating: summary(db, p.id), attributes: p.attributes ?? {}, ...publicMedia(p),
+      ...(p.showLimitedBelow !== undefined && v.trackInventory && sellableQty(v) > 0 && sellableQty(v) <= p.showLimitedBelow ? { remaining: sellableQty(v) } : {}),
+      ...(v.availability === "pre_order" ? { expectedWindow: p.expectedWindow ?? null } : {}),
     });
   }
   return out;
 }
 
-export function effectiveRate(db: MemoryDb, _env: Env) {
-  if (db.exchangeRate) return { rate: db.exchangeRate, fromConfig: false };
-  return { rate: null, fromConfig: false };
-}
-
-const json = (data: unknown, status = 200) =>
-  new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff" } });
-
+/** The standard category tree must always exist: a store whose saved state has no categories gets it back instead of failing. */
 function ensureCategories(db: MemoryDb) {
-  if (!db.categories?.length) {
-    db.categories = SEED_CATEGORIES.map((c) => ({ ...c }));
-  }
-  return db.categories;
+  if (!db.categories.length) db.categories = SEED_CATEGORIES.map((c) => ({ ...c }));
 }
 
-function asMinor(v: unknown): number | undefined {
-  if (v === undefined || v === null || v === "") return undefined;
-  const n = typeof v === "number" ? v : Number(v);
-  if (!Number.isFinite(n) || n < 0) return undefined;
-  return Math.round(n);
-}
-
-function normalizeAvailability(raw: unknown): Availability {
-  const s = String(raw ?? "available");
-  if (s === "enquiry") return "temporarily_unavailable";
-  const allowed: Availability[] = ["available", "pre_order", "out_of_stock", "coming_soon", "temporarily_unavailable", "discontinued"];
-  return (allowed.includes(s as Availability) ? s : "available") as Availability;
-}
-
-function listAdminProducts(db: MemoryDb) {
-  return [...db.products.values()].map((pr) => {
+function catalogueCounts(db: MemoryDb) {
+  let products = 0, published = 0, missingPrice = 0;
+  for (const pr of db.products.values()) {
+    if (pr.archived) continue;
+    products++;
     const v = [...db.variants.values()].find((x) => x.productId === pr.id);
-    return {
-      id: pr.id, slug: pr.slug, name: pr.name, archived: pr.archived, variantId: v?.id ?? null,
-      sku: v?.id.split("::")[1] ?? null, availability: v?.availability ?? null, published: v?.published ?? false,
-      categoryId: pr.categoryId, attributes: pr.attributes ?? {}, price: v?.price ?? {}, salePrice: v?.salePrice ?? null,
-      onHand: v?.onHand ?? 0, reserved: v?.reserved ?? 0, preOrderEnabled: !!v?.preOrder?.enabled,
-      shortDescription: pr.shortDescription, image: pr.image, imageAlt: pr.imageAlt,
-    };
-  });
+    if (v?.published) published++;
+    if (!v || (v.price.GHS === undefined && v.price.USD === undefined)) missingPrice++;
+  }
+  return { products, published, drafts: products - published, missingPrice, categories: db.categories.length };
 }
 
-const SAMPLE_SEED: {
-  name: string; sku: string; categoryId: string; shortDescription: string; image: string; imageAlt: string;
-  priceGhs?: number; priceUsd?: number; onHand: number; published: boolean;
-}[] = [
-  { name: "Laundry Basket", sku: "DDT-003", categoryId: "cat-household-and-kitchen--household-items", shortDescription: "Sturdy laundry basket for home use.", image: "/products/DDT-003.png", imageAlt: "Laundry Basket", priceGhs: 8500, priceUsd: 800, onHand: 25, published: true },
-  { name: "Storage Container Set", sku: "DDT-004", categoryId: "cat-household-and-kitchen--household-items", shortDescription: "Set of storage containers.", image: "/products/DDT-004.png", imageAlt: "Storage Container Set", priceGhs: 12000, priceUsd: 1100, onHand: 40, published: true },
-  { name: "Cotton T-Shirt", sku: "DDT-010", categoryId: "cat-clothing-and-fashion--mens-clothes", shortDescription: "Everyday cotton t-shirt.", image: "/products/DDT-010.png", imageAlt: "Cotton T-Shirt", priceGhs: 4500, priceUsd: 400, onHand: 100, published: true },
-  { name: "School Backpack", sku: "DDT-020", categoryId: "cat-bags-and-luggage--school-bags", shortDescription: "Durable school backpack.", image: "/products/DDT-020.png", imageAlt: "School Backpack", priceGhs: 15000, priceUsd: 1400, onHand: 30, published: true },
-  { name: "Phone Power Bank", sku: "DDT-030", categoryId: "cat-phones-and-accessories--power-banks", shortDescription: "Portable power bank.", image: "/products/DDT-030.png", imageAlt: "Phone Power Bank", priceGhs: 18000, priceUsd: 1600, onHand: 50, published: true },
-  { name: "Leather Belt", sku: "DDT-040", categoryId: "cat-clothing-and-fashion--mens-clothes", shortDescription: "Classic leather belt.", image: "/products/DDT-040.png", imageAlt: "Leather Belt", priceGhs: 7500, priceUsd: 700, onHand: 20, published: true },
-  { name: "Hair Extension Pack", sku: "DDT-050", categoryId: "cat-hair-and-hair-accessories--hair-extensions", shortDescription: "Hair extension pack.", image: "/products/DDT-050.png", imageAlt: "Hair Extension Pack", priceGhs: 22000, priceUsd: 2000, onHand: 15, published: true },
-  { name: "Ceramic Sink", sku: "DDT-060", categoryId: "cat-building-materials-and-fixtures--sinks", shortDescription: "Bathroom ceramic sink.", image: "/products/DDT-060.png", imageAlt: "Ceramic Sink", priceGhs: 45000, priceUsd: 4000, onHand: 8, published: true },
-];
+const AVAILABILITIES: Availability[] = ["available", "pre_order", "out_of_stock", "coming_soon", "temporarily_unavailable", "discontinued"];
+/** Embedded (data:) photos are only a fallback for shops without an R2 bucket; keep them small so product lists stay fast. */
+export const MAX_EMBEDDED_IMAGE_CHARS = 350_000;
 
-export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps = {}): Promise<Response> {
+function minorField(b: Body, key: string, label: string, errors: string[]): number | undefined {
+  const v = b[key];
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+  if (!Number.isInteger(n) || n < 0) { errors.push(`${label} must be a non-negative whole number of minor units (pesewas / cents).`); return undefined; }
+  return n;
+}
+
+/** Turns an admin "new product" request into the service input. Everything is validated; nothing is silently changed. */
+export function normaliseNewProduct(b: Body): NewProduct {
+  const errors: string[] = [];
+  const name = str(b, "name").trim();
+  const sku = str(b, "sku").trim();
+  if (!name) errors.push("Name is required.");
+  if (!sku) errors.push("SKU is required.");
+  const priceGhs = minorField(b, "priceGhs", "GHS price", errors);
+  const priceUsd = minorField(b, "priceUsd", "USD price", errors);
+  const onHand = minorField(b, "onHand", "Stock", errors);
+  const rawAvail = b["availability"] === "enquiry" ? "temporarily_unavailable" : b["availability"]; // legacy label from an earlier dashboard
+  let availability: Availability | undefined;
+  if (rawAvail !== undefined && rawAvail !== "") {
+    if (typeof rawAvail === "string" && (AVAILABILITIES as string[]).includes(rawAvail)) availability = rawAvail as Availability;
+    else errors.push("Choose a valid availability status.");
+  }
+  const image = str(b, "image").trim();
+  if (image.startsWith("blob:")) errors.push("That photo was only a local preview and wasn't uploaded. Upload it again, or paste an image link.");
+  else if (image.startsWith("data:") && !/^data:image\/(png|jpe?g|gif|webp);base64,/i.test(image)) errors.push("The embedded photo must be a PNG, JPEG, WebP or GIF image.");
+  else if (image.length > MAX_EMBEDDED_IMAGE_CHARS && image.startsWith("data:")) errors.push("That photo is too large to embed. Add an R2 bucket named MEDIA to upload full-size photos, or use a smaller image.");
+  if (errors.length) throw new ValidationError(errors);
+  const attributes = b["attributes"] && typeof b["attributes"] === "object" && !Array.isArray(b["attributes"]) ? (b["attributes"] as Record<string, string>) : undefined;
+  return {
+    name, sku, categoryId: str(b, "categoryId"),
+    shortDescription: str(b, "shortDescription").trim() || name,
+    ...(str(b, "description").trim() ? { description: str(b, "description").trim() } : {}),
+    image, imageAlt: str(b, "imageAlt").trim() || name,
+    ...(priceGhs !== undefined ? { priceGhs } : {}), ...(priceUsd !== undefined ? { priceUsd } : {}),
+    ...(onHand !== undefined ? { onHand } : {}),
+    published: b["published"] === true,
+    ...(availability ? { availability } : {}),
+    preOrderEnabled: availability === "pre_order",
+    ...(str(b, "expectedWindow").trim() ? { expectedWindow: str(b, "expectedWindow").trim().slice(0, 80) } : {}),
+    ...(attributes ? { attributes } : {}),
+  } as NewProduct;
+}
+
+export async function handle(req: Request, env: Env, p: Persistence, deps: Deps = {}): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
-  const portal = resolvePortalPath(env) ?? (STAFF_OPEN_ACCESS ? "/dera-owner-console" : null);
+  const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
+  const iterations = env.PBKDF2_ITERATIONS ? parseInt(env.PBKDF2_ITERATIONS, 10) : undefined;
+  const portal = `/${OPEN_ACCESS_PORTAL_PATH}`;
 
-  const mediaMatch = path.match(/^\/media\/([a-f0-9]{32}\.(?:jpg|png|webp|gif))$/i);
-  if (mediaMatch && req.method === "GET") {
-    return serveImage(env.MEDIA, mediaMatch[1]!);
-  }
+  try {
+    if (!limiters.general.check(`${ip}`).allowed) return json({ error: "Too many requests" }, 429);
 
-  let body: Record<string, unknown> = {};
-  const isMediaUpload =
-    STAFF_OPEN_ACCESS &&
-    portal &&
-    path === `${portal}/api/media` &&
-    req.method === "POST";
-  if (!isMediaUpload && req.method !== "GET" && req.method !== "HEAD") {
-    try { body = (await req.json()) as Record<string, unknown>; } catch { body = {}; }
-  }
-
-  if (path === "/api/products" && req.method === "GET") return json(await transact(p, (db) => publicProducts(db)));
-  if (path === "/api/categories" && req.method === "GET") return json(await transact(p, (db) => ensureCategories(db).filter((c) => c.published)));
-  if (path === "/api/site" && req.method === "GET") return json(await transact(p, (db) => db.business ?? { name: "Dera Darko Trade" }));
-  if (path === "/api/rates" && req.method === "GET") return json({ displayMode: "DUAL", rate: null });
-
-  if (STAFF_OPEN_ACCESS && portal && (path === `${portal}/api` || path.startsWith(`${portal}/api/`))) {
-    const sub = path.slice(portal.length + 4) || "/";
-    const open = await transact(p, (db) => openAccessActor(db));
-    if (!open) return json({ error: "Not found" }, 404);
-    const { actor } = open;
-
-    try {
-      if (sub === "/me" && req.method === "GET") {
-        return json({ id: actor.id, roles: actor.roles, mfa: "verified", mustChangePassword: false });
-      }
-      if (sub === "/overview" && req.method === "GET") {
-        return json(await transact(p, (db) => {
-          ensureCategories(db);
-          return {
-            products: db.products.size,
-            published: [...db.variants.values()].filter((v) => v.published).length,
-            orders: db.orders.size,
-            openTickets: [...db.tickets.values()].filter((t) => t.status === "open" || t.status === "pending").length,
-            categories: db.categories.length,
-          };
-        }));
-      }
-      if (sub === "/categories" && req.method === "GET") {
-        return json(await transact(p, (db) => ensureCategories(db)));
-      }
-      if (sub === "/products" && req.method === "GET") {
-        requirePermission(actor, "product.read");
-        return json(await transact(p, (db) => listAdminProducts(db)));
-      }
-      if (sub === "/products" && req.method === "POST") {
-        requirePermission(actor, "product.write");
-        const priceGhs = asMinor(body.priceGhs);
-        const priceUsd = asMinor(body.priceUsd);
-        const onHand = asMinor(body.onHand) ?? 0;
-        let published = body.published === true;
-        if (published && priceGhs === undefined && priceUsd === undefined) {
-          published = false;
-        }
-        const availability = normalizeAvailability(body.availability);
-        const name = String(body.name ?? "").trim();
-        let sku = String(body.sku ?? "").trim();
-        if (!sku && name) sku = `DDT-GEN-${Date.now().toString(36).toUpperCase()}`;
-
-        const row = await transact(p, (db) => {
-          ensureCategories(db);
-          let categoryId = String(body.categoryId ?? "");
-          if (!db.categories.some((c) => c.id === categoryId)) {
-            const fallback = db.categories.find((c) => c.parentId) ?? db.categories[0];
-            if (!fallback) throw new ValidationError(["No categories available. Refresh and try again."]);
-            categoryId = fallback.id;
-          }
-          let image = String(body.image ?? "/products/placeholder.png");
-          if (image.startsWith("blob:")) image = "/products/placeholder.png";
-
-          return createProduct(db, actor, {
-            name,
-            categoryId,
-            shortDescription: String(body.shortDescription ?? name),
-            description: body.description ? String(body.description) : undefined,
-            image,
-            imageAlt: String(body.imageAlt ?? name || "Product"),
-            sku,
-            priceGhs,
-            priceUsd,
-            onHand,
-            published,
-            availability,
-            preOrderEnabled: availability === "pre_order",
-          });
-        });
-        return json({ id: row.id, slug: row.slug, published });
-      }
-      if (sub === "/products/publish" && req.method === "POST") {
-        await transact(p, (db) => setPublishedState(db, actor, String(body.productId ?? ""), body.published === true));
-        return json({ ok: true });
-      }
-      if (sub === "/media" && req.method === "POST") {
-        requirePermission(actor, "product.write");
-        const data = await req.arrayBuffer();
-        if (env.MEDIA) {
-          const result = await storeImage(env.MEDIA, data);
-          if ("error" in result) return json({ error: result.error, errors: [result.error] }, 400);
-          return json({ url: result.url });
-        }
-        if (data.byteLength > MEDIA_MAX_BYTES) {
-          return json({ error: "Image too large and MEDIA (R2) is not configured.", errors: ["Image too large and MEDIA (R2) is not configured."] }, 400);
-        }
-        const bytes = new Uint8Array(data);
-        const kind = sniffImage(bytes);
-        if (!kind) return json({ error: "Only JPEG, PNG, WebP or GIF images can be uploaded.", errors: ["Only JPEG, PNG, WebP or GIF images can be uploaded."] }, 400);
-        let binary = "";
-        const chunk = 0x8000;
-        for (let i = 0; i < bytes.length; i += chunk) {
-          binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-        }
-        const b64 = btoa(binary);
-        return json({ url: `data:${kind.type};base64,${b64}` });
-      }
-      if (sub === "/products/seed" && req.method === "POST") {
-        const created = await transact(p, (db) => {
-          ensureCategories(db);
-          const out: { name: string; sku: string }[] = [];
-          for (const s of SAMPLE_SEED) {
-            if ([...db.variants.values()].some((v) => v.id.split("::")[1] === s.sku)) continue;
-            const cat = db.categories.find((c) => c.id === s.categoryId) ?? db.categories.find((c) => c.parentId) ?? db.categories[0];
-            if (!cat) continue;
-            try {
-              createProduct(db, actor, {
-                name: s.name,
-                categoryId: cat.id,
-                shortDescription: s.shortDescription,
-                image: s.image,
-                imageAlt: s.imageAlt,
-                sku: s.sku,
-                priceGhs: s.priceGhs,
-                priceUsd: s.priceUsd,
-                onHand: s.onHand,
-                published: s.published,
-                availability: "available",
-              });
-              out.push({ name: s.name, sku: s.sku });
-            } catch {
-              /* skip */
-            }
-          }
-          return out;
-        });
-        return json({ ok: true, count: created.length, created });
-      }
-      if (req.method === "GET") return json([]);
-      return json({ ok: true });
-    } catch (e) {
-      if (e instanceof ValidationError) return json({ error: e.message, errors: e.errors }, 422);
-      if (e instanceof Forbidden) return json({ error: e.message || "Forbidden", errors: [e.message || "Forbidden"] }, 403);
-      console.error(e);
-      return json({ error: e instanceof Error ? e.message : "Something went wrong", errors: [e instanceof Error ? e.message : "Something went wrong"] }, 500);
+    const provider = deps.payments ?? providerFromEnv(env);
+    const isWebhook = path === "/api/webhooks/payments" || (!!provider && path === `/api/webhooks/${provider.name}`);
+    if (!["GET", "HEAD"].includes(req.method) && !isWebhook) {
+      const origin = req.headers.get("origin");
+      if (origin !== env.SITE_ORIGIN) return json({ error: "Forbidden" }, 403); // CSRF: same-origin only
     }
-  }
 
-  return json({ error: "Not found", errors: ["Not found"] }, 404);
+    /* ---------- payment webhook: raw body + HMAC, no cookies involved ---------- */
+    if (isWebhook && req.method === "POST" && provider && path === `/api/webhooks/${provider.name}`) {
+      // Provider webhook: authenticity is the provider's signature over the RAW body; amounts are re-checked against our own order.
+      const raw = await req.text();
+      const ev = await provider.parseWebhook(raw, req.headers);
+      if (ev === null) return json({ error: "Invalid signature" }, 401);
+      if (ev === "ignored") return json({ received: true, result: "ignored" });
+      const r = await transact(p, (db) => handleVerifiedPayment(db, ev));
+      if (r.kind === "applied") { const to = await transact(p, (db) => { const o = [...db.orders.values()].find((x) => x.ref === ev.orderRef); return o ? emailOfOrder(db, o) : undefined; }); if (to) await deps.notify?.(to, "payment_received", { ref: ev.orderRef }); }
+      return json({ received: true, result: r.kind });
+    }
+    if (isWebhook && req.method === "POST") {
+      const raw = await req.text();
+      if (!(await verifyWebhook({ secret: env.PAYMENT_WEBHOOK_SECRET, rawBody: raw, signature: req.headers.get("x-signature") }))) return json({ error: "Invalid signature" }, 401);
+      let ev: Body; try { ev = JSON.parse(raw) as Body; } catch { return json({ error: "Bad request" }, 400); }
+      const amount = num(ev, "amount"), currency = str(ev, "currency"), status = str(ev, "status");
+      if (!str(ev, "eventId") || !str(ev, "orderRef") || !Number.isInteger(amount) || (currency !== "GHS" && currency !== "USD") || (status !== "success" && status !== "failed")) return json({ error: "Bad request" }, 400);
+      const r = await transact(p, (db) => handleVerifiedPayment(db, { eventId: str(ev, "eventId"), orderRef: str(ev, "orderRef"), amount, currency, status }));
+      return json({ received: true, result: r.kind });
+    }
+
+    let body: Body = {};
+    const isUpload = req.method === "POST" && path.endsWith("/api/media"); // binary body: read by the upload handler, not as JSON
+    if (!["GET", "HEAD"].includes(req.method) && !isUpload) {
+      const parsed = await readBody(req, path.endsWith("/api/products/import") ? 1_300_000 : undefined); // only the staff CSV import may be large
+      if (!parsed) return json({ error: "Bad request" }, 400); // malformed or oversized JSON
+      body = parsed;
+    }
+
+    /* ---------- authentication helper ---------- */
+    const token = cookieOf(req, COOKIE);
+    const who = async (): Promise<{ actor: Actor | null; sid?: string }> => {
+      if (!token) return { actor: null };
+      const sess = await verifySession(token, env.SESSION_SECRET);
+      if (!sess) return { actor: null };
+      const actor = await transact(p, (db) => authenticate(db, token, env.SESSION_SECRET));
+      return actor ? { actor, sid: sess.sid } : { actor: null };
+    };
+
+    /* ---------- admin API: only under the secret portal path ---------- */
+    if (portal && (path === `${portal}/api` || path.startsWith(`${portal}/api/`))) {
+      const sub = path.slice(portal.length + 4) || "/";
+      // The dashboard is open: every request on the dashboard path acts as the built-in owner. There is no login.
+      const actor = await transact(p, (db) => openAccessActor(db));
+      try {
+        if (sub === "/me" && req.method === "GET") return json({ id: actor.id, roles: actor.roles, storage: p instanceof MemoryPersistence ? "memory" : "database" });
+        if (sub === "/products" && req.method === "GET") {
+          requirePermission(actor, "product.read");
+          return json(await transact(p, (db) => [...db.products.values()].map((pr) => {
+            const v = [...db.variants.values()].find((x) => x.productId === pr.id);
+            return { id: pr.id, slug: pr.slug, name: pr.name, archived: pr.archived, variantId: v?.id ?? null, sku: v?.id.split("::")[1] ?? null, availability: v?.availability ?? null, published: v?.published ?? false,
+              categoryId: pr.categoryId, attributes: pr.attributes ?? {}, price: v?.price ?? {}, salePrice: v?.salePrice ?? null, onHand: v?.onHand ?? 0, reserved: v?.reserved ?? 0, preOrderEnabled: !!v?.preOrder?.enabled };
+          })));
+        }
+        if (sub === "/reauth" && req.method === "POST") return json({ ok: true });
+        if (sub === "/products" && req.method === "POST") {
+          const input = normaliseNewProduct(body);
+          const prod = await transact(p, (db) => { ensureCategories(db); return createProduct(db, actor, input); });
+          return json({ id: prod.id, slug: prod.slug, published: input.published === true }, 201);
+        }
+        if (sub === "/products/import" && req.method === "POST") {
+          const dryRun = body["dryRun"] !== false; // checking is the default; saving must be asked for explicitly
+          await transact(p, (db) => { ensureCategories(db); });
+          class DryRun extends Error { constructor(public result: unknown) { super("dry run"); } }
+          try { return json(await transact(p, (db) => { const r = importProducts(db, actor, body["csv"], dryRun); if (dryRun) throw new DryRun(r); return r; })); }
+          catch (e) { if (e instanceof DryRun) return json(e.result); throw e; } // nothing was saved
+        }
+        if (sub === "/products/attributes" && req.method === "POST") return json({ attributes: await transact(p, (db) => setProductAttributes(db, actor, str(body, "productId"), body["attributes"])) });
+        if (sub === "/products/media" && req.method === "GET") return json(await transact(p, (db) => listMedia(db, actor, url.searchParams.get("productId") ?? "")));
+        if (sub === "/products/media" && req.method === "POST") return json(await transact(p, (db) => addMedia(db, actor, str(body, "productId"), body)), 201);
+        if (sub === "/products/media/review" && req.method === "POST") return json(await transact(p, (db) => reviewMedia(db, actor, str(body, "productId"), str(body, "imageId"), body["action"])));
+        if (sub === "/products/status" && req.method === "POST") {
+          const ids = Array.isArray(body["ids"]) ? (body["ids"] as unknown[]).filter((x): x is string => typeof x === "string") : [];
+          await transact(p, (db) => setAvailability(db, actor, ids, str(body, "availability") as Availability)); return json({ ok: true });
+        }
+        if (sub === "/products/publish" && req.method === "POST") { await transact(p, (db) => setPublishedState(db, actor, str(body, "productId"), bool(body, "published"))); return json({ ok: true }); }
+        if (sub === "/prices" && req.method === "POST") { await transact(p, (db) => setPrices(db, actor, str(body, "variantId"), body as never)); return json({ ok: true }); }
+        if (sub === "/stock" && req.method === "POST") { await transact(p, (db) => adjustStock(db, actor, str(body, "variantId"), num(body, "delta"), str(body, "reason"))); return json({ ok: true }); }
+        if (sub === "/orders" && req.method === "GET") {
+          requirePermission(actor, "order.read");
+          return json(await transact(p, (db) => [...db.orders.values()].map((o) => ({ ...orderView(o), guestEmail: o.guestEmail ?? null, address: o.address, paymentMethod: o.paymentMethod ?? null }))));
+        }
+        if (sub === "/orders/status" && req.method === "POST") {
+          const told = await transact(p, (db) => { staffUpdateStatus(db, actor, str(body, "orderId"), str(body, "to") as OrderStatus, str(body, "note") || undefined); const o = db.orders.get(str(body, "orderId"))!; return NOTIFY_STATUSES.has(o.status) ? { to: emailOfOrder(db, o), ref: o.ref, status: o.status } : null; });
+          if (told?.to) await deps.notify?.(told.to, "order_update", { ref: told.ref, subject: labelOf(told.status) });
+          return json({ ok: true });
+        }
+        if (sub === "/preorder-queue" && req.method === "GET") return json(await transact(p, (db) => preorderQueue(db, actor)));
+        if (sub === "/orders/allocate-preorder" && req.method === "POST") { await transact(p, (db) => allocatePreorder(db, actor, str(body, "orderId"))); return json({ ok: true }); }
+        if (sub === "/orders/confirm-bank-transfer" && req.method === "POST") { const { kind, to, ref } = await transact(p, (db) => { const kind = confirmBankTransfer(db, actor, str(body, "orderId"), num(body, "amount"), str(body, "reference")); const o = db.orders.get(str(body, "orderId"))!; return { kind, to: emailOfOrder(db, o), ref: o.ref }; }); if (kind === "applied" && to) await deps.notify?.(to, "payment_received", { ref }); return json({ ok: true, result: kind }); }
+        if (sub === "/refunds" && req.method === "POST") {
+          const r = await transact(p, (db) => requestRefund(db, actor, str(body, "orderId"), num(body, "amount"))); return json(r);
+        }
+        if (sub === "/refunds/complete" && req.method === "POST") { requirePermission(actor, "order.refund"); await transact(p, (db) => completeRefund(db, str(body, "orderId"), num(body, "amount"))); return json({ ok: true }); }
+        if (sub === "/export/orders.csv" && req.method === "GET") {
+          const csv = await transact(p, (db) => exportOrdersCsv(db, actor));
+          return new Response(csv, { headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="orders.csv"', ...NO_STORE } });
+        }
+        if (sub === "/categories" && req.method === "GET") return json(await transact(p, (db) => { ensureCategories(db); return categoryAdmin(db, actor).list(); }));
+        if (sub === "/categories" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).add(str(body, "name"), str(body, "parentId") || null, (str(body, "filterProfile") || undefined) as never)); return json({ ok: true }, 201); }
+        if (sub === "/categories/rename" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).rename(str(body, "id"), str(body, "name"))); return json({ ok: true }); }
+        if (sub === "/categories/visibility" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).hide(str(body, "id"), bool(body, "hidden"))); return json({ ok: true }); }
+        if (sub === "/categories/move" && req.method === "POST") { await transact(p, (db) => categoryAdmin(db, actor).move(str(body, "id"), num(body, "position"))); return json({ ok: true }); }
+        if (sub === "/suppliers" && req.method === "GET") return json(await transact(p, (db) => listSuppliers(db, actor)));
+        if (sub === "/suppliers" && req.method === "POST") return json(await transact(p, (db) => saveSupplier(db, actor, body)), 201);
+        if (sub === "/purchase-orders" && req.method === "GET") return json(await transact(p, (db) => listPurchaseOrders(db, actor)));
+        if (sub === "/purchase-orders" && req.method === "POST") { const po = await transact(p, (db) => createPurchaseOrder(db, actor, body)); return json({ id: po.id, ref: po.ref }, 201); }
+        if (sub === "/purchase-orders/status" && req.method === "POST") { await transact(p, (db) => setPurchaseOrderStatus(db, actor, str(body, "id"), body["to"])); return json({ ok: true }); }
+        if (sub === "/purchase-orders/receive" && req.method === "POST") { await transact(p, (db) => receivePurchaseOrder(db, actor, str(body, "id"), body["lines"])); return json({ ok: true }); }
+        if (sub === "/media" && req.method === "POST") {
+          requirePermission(actor, "product.write");
+          if (Number(req.headers.get("content-length") ?? 0) > 3_100_000) return json({ errors: ["The image is too large (3 MB maximum). Resize it and try again."] }, 422);
+          const raw = await req.arrayBuffer();
+          if (env.MEDIA) {
+            const r = await storeImage(env.MEDIA, raw);
+            if ("error" in r) return json({ errors: [r.error] }, 422);
+            await transact(p, (db) => { db.log("media.uploaded", { url: r.url }, actor!.id); });
+            return json(r, 201);
+          }
+          // No R2 bucket yet: small, byte-verified images are embedded in the product record so the dashboard still works.
+          const bytes = new Uint8Array(raw);
+          const kind = sniffImage(bytes);
+          if (!kind) return json({ errors: ["Only JPEG, PNG, WebP or GIF images can be uploaded."] }, 422);
+          let binary = "";
+          for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+          const url = `data:${kind.type};base64,${btoa(binary)}`;
+          if (url.length > MAX_EMBEDDED_IMAGE_CHARS) return json({ errors: ["Without an R2 bucket (binding MEDIA) photos must be under about 250 KB. Compress the image, or add the bucket for full-size photos."] }, 422);
+          await transact(p, (db) => { db.log("media.uploaded", { embedded: true }, actor!.id); });
+          return json({ url, embedded: true }, 201);
+        }
+        if (sub === "/overview" && req.method === "GET") return json(await transact(p, (db) => ({ ...overview(db, actor), ...(can(actor, "product.read") ? { catalogue: catalogueCounts(db) } : {}) })));
+        if (sub === "/business" && req.method === "GET") { requirePermission(actor, "settings.write"); return json(await transact(p, (db) => db.business)); }
+        if (sub === "/exchange-rate" && req.method === "GET") {
+          requirePermission(actor, "settings.write");
+          return json(await transact(p, (db) => { const { rate, fromConfig } = effectiveRate(db, env); return { rate, fromConfig, displayMode: db.settings["displayMode"] ?? "DUAL", ...(rate ? { ageDays: rateAgeDays(rate, Date.now()), stale: isStale(rate, Date.now()) } : {}) }; }));
+        }
+        if (sub === "/exchange-rate" && req.method === "POST") {
+          requirePermission(actor, "settings.write");
+          const mode = body["displayMode"];
+          if (mode !== undefined && mode !== "GHS" && mode !== "USD" && mode !== "DUAL") return json({ errors: ["Choose GHS only, USD only, or both."] }, 422);
+          const clearing = body["clear"] === true;
+          const c = clearing ? null : cleanRate(body, Date.now(), actor!.id);
+          if (c && !c.ok) return json({ errors: c.errors }, 422);
+          await transact(p, (db) => {
+            if (mode) db.settings["displayMode"] = mode;
+            if (clearing) { delete db.exchangeRate; db.log("exchange_rate.cleared", {}, actor!.id); }
+            else if (c && c.ok) { db.log("exchange_rate.set", { ghsPerUsdMicro: c.rate.ghsPerUsdMicro, source: c.rate.source, effectiveDate: c.rate.effectiveDate, previous: db.exchangeRate?.ghsPerUsdMicro ?? 0 }, actor!.id); db.exchangeRate = c.rate; }
+            else if (mode) db.log("display_mode.set", { mode }, actor!.id);
+          });
+          return json({ ok: true });
+        }
+        if (sub === "/business" && req.method === "POST") {
+          requirePermission(actor, "settings.write");
+          const c = cleanBusiness(body); if (!c.ok) return json({ errors: c.errors }, 422);
+          await transact(p, (db) => { db.business = c.info; db.log("business.updated", { fields: Object.keys(c.info).length }, actor!.id); });
+          return json({ ok: true, business: c.info });
+        }
+        if (sub === "/reviews" && req.method === "GET") return json(await transact(p, (db) => listForModeration(db, actor)));
+        if (sub === "/reviews/moderate" && req.method === "POST") { await transact(p, (db) => moderate(db, actor, str(body, "id"), body["action"])); return json({ ok: true }); }
+        if (sub === "/pages" && req.method === "GET") return json(await transact(p, (db) => listPages(db, actor)));
+        if (sub === "/pages" && req.method === "POST") { await transact(p, (db) => savePage(db, actor, str(body, "slug"), { title: body["title"], sections: body["sections"], reviewed: body["reviewed"] })); return json({ ok: true }); }
+        if (sub === "/pages/reset" && req.method === "POST") { await transact(p, (db) => resetPage(db, actor, str(body, "slug"))); return json({ ok: true }); }
+        if (sub === "/quotes" && req.method === "GET") return json(await transact(p, (db) => listQuotes(db, actor)));
+        if (sub === "/quotes/send" && req.method === "POST") {
+          const to = await transact(p, (db) => { sendQuote(db, actor, str(body, "id"), { currency: body["currency"], total: body["total"], validDays: body["validDays"], message: body["message"] }); const q = db.quotes.get(str(body, "id"))!; return { email: q.email, ref: q.ref }; });
+          await deps.notify?.(to.email, "quote_ready", { ref: to.ref });
+          return json({ ok: true });
+        }
+        if (sub === "/tickets" && req.method === "GET") return json(await transact(p, (db) => listTickets(db, actor)));
+        if (sub === "/tickets/reply" && req.method === "POST") {
+          const t = await transact(p, (db) => { staffReply(db, actor, str(body, "ticketId"), str(body, "body"), bool(body, "internal")); const x = db.tickets.get(str(body, "ticketId"))!; return { email: x.email, subject: x.subject, id: x.id }; });
+          if (!bool(body, "internal")) await deps.notify?.(t.email, "ticket_reply", { ref: t.id, subject: t.subject }); // internal notes never leave the building
+          return json({ ok: true });
+        }
+        if (sub === "/tickets/status" && req.method === "POST") { await transact(p, (db) => setTicketStatus(db, actor, str(body, "ticketId"), str(body, "status") as never)); return json({ ok: true }); }
+        if (sub === "/analytics" && req.method === "GET") {
+          requirePermission(actor, "analytics.read");
+          const days = Math.min(365, Math.max(1, parseInt(url.searchParams.get("days") ?? "30", 10) || 30));
+          const to = Date.now(), from = to - days * 86_400_000;
+          return json(await transact(p, (db) => ({ days, funnel: funnel(db, from, to), revenue: revenue(db, actor, from, to) })));
+        }
+        if (sub === "/zones" && req.method === "GET") return json(await transact(p, (db) => listZones(db, actor)));
+        if (sub === "/zones" && req.method === "POST") return json(await transact(p, (db) => saveZone(db, actor, body)), 201);
+        if (sub === "/zones/delete" && req.method === "POST") { await transact(p, (db) => deleteZone(db, actor, str(body, "id"))); return json({ ok: true }); }
+        if (sub === "/discounts" && req.method === "GET") return json(await transact(p, (db) => listDiscounts(db, actor)));
+        if (sub === "/discounts" && req.method === "POST") return json(await transact(p, (db) => saveDiscount(db, actor, body)), 201);
+        if (sub === "/discounts/active" && req.method === "POST") { await transact(p, (db) => setDiscountActive(db, actor, str(body, "code"), bool(body, "active"))); return json({ ok: true }); }
+        if (sub === "/audit" && req.method === "GET") { requirePermission(actor, "audit.read"); return json(await transact(p, (db) => db.audit.slice(-200))); }
+      } catch (e) { return mapError(e); }
+      return notFound();
+    }
+
+    /* ---------- public / customer API ---------- */
+    if (path === "/api/events" && req.method === "POST") {
+      // Consent-gated, allow-listed, pseudonymised (see services/analytics.ts). Always 200 so the endpoint reveals nothing.
+      const recorded = await transact(p, (db) => track(db, { consent: bool(body, "consent"), kind: str(body, "kind"), path: str(body, "path"), source: str(body, "source"), campaign: str(body, "campaign"), clientKey: ip, secret: env.SESSION_SECRET }));
+      return json({ recorded });
+    }
+    if (path === "/api/reviews" && req.method === "GET") {
+      const { actor } = await who();
+      const r = await transact(p, (db) => listPublished(db, actor, url.searchParams.get("slug") ?? ""));
+      return r ? json(r) : notFound();
+    }
+    if (path === "/api/reviews" && req.method === "POST") {
+      if (!limiters.auth.check(`rev:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const { actor } = await who();
+      try { await transact(p, (db) => submitReview(db, actor, str(body, "slug"), { rating: body["rating"], title: body["title"], body: body["body"] })); return json({ ok: true }, 201); } catch (e) { return mapError(e); }
+    }
+    if (path.startsWith("/api/pages/") && req.method === "GET") {
+      const page = await transact(p, (db) => getPage(db, path.slice("/api/pages/".length)));
+      return page ? json(page, 200, { "Cache-Control": "public, max-age=60" }) : notFound();
+    }
+    if (path === "/api/categories" && req.method === "GET") return json(await transact(p, (db) => db.categories.filter((c) => c.published && (!c.parentId || db.categories.find((x) => x.id === c.parentId)?.published))));
+    if (path === "/api/shipping-zones" && req.method === "GET") return json(await transact(p, (db) => [...db.zones.values()].map((z) => ({ id: z.id, name: z.name, regions: z.regions, currency: z.currency, baseFee: z.baseFee, estimate: z.estimate }))));
+    if (path === "/api/products" && req.method === "GET") return json(await transact(p, (db) => publicProducts(db)));
+
+    if (path === "/api/register" && req.method === "POST") {
+      if (!limiters.auth.check(`reg:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const r = await transact(p, (db) => registerCustomer(db, { email: str(body, "email"), password: str(body, "password"), firstName: str(body, "firstName"), lastName: str(body, "lastName"), acceptTerms: bool(body, "acceptTerms"), marketingConsent: bool(body, "marketingConsent") }, iterations));
+      if (!r.ok) return json({ errors: r.errors }, 422);
+      if ("verifyToken" in r && r.verifyToken) await deps.mail?.(str(body, "email"), "verify_email", { token: r.verifyToken });
+      return json({ ok: true }, 201); // identical whether or not the email already existed
+    }
+    if (path === "/api/verify-email" && req.method === "POST") return (await transact(p, (db) => verifyEmail(db, str(body, "token")))) ? json({ ok: true }) : json({ error: "Invalid or expired link" }, 400);
+
+    if (path === "/api/login" && req.method === "POST") {
+      if (!limiters.auth.check(`login:${ip}`).allowed) return json({ error: "Too many attempts. Try again later." }, 429);
+      const r = await transact(p, (db) => login(db, { email: str(body, "email"), password: str(body, "password"), secret: env.SESSION_SECRET }));
+      return r.ok ? json({ ok: true }, 200, { "Set-Cookie": sessionCookie(r.token, 43200) }) : json({ error: r.error }, 401);
+    }
+    if (path === "/api/logout" && req.method === "POST") {
+      const { sid } = await who(); if (sid) await transact(p, (db) => logout(db, sid));
+      return json({ ok: true }, 200, { "Set-Cookie": sessionCookie("", 0) });
+    }
+    if (path === "/api/password/forgot" && req.method === "POST") {
+      if (!limiters.auth.check(`fp:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const r = await transact(p, (db) => requestPasswordReset(db, str(body, "email")));
+      if ("token" in r && r.token) await deps.mail?.(str(body, "email"), "password_reset", { token: r.token });
+      return json({ ok: true }); // generic: no account enumeration
+    }
+    if (path === "/api/password/reset" && req.method === "POST") {
+      const r = await transact(p, (db) => resetPassword(db, str(body, "token"), str(body, "password"), Date.now(), iterations));
+      return r.ok ? json({ ok: true }) : json({ errors: r.errors }, 400);
+    }
+
+    if (path === "/api/quotes" && req.method === "POST") {
+      if (!limiters.auth.check(`quote:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const r = await transact(p, (db) => requestQuote(db, body));
+      return json(r, 201); // the secret is shown once to the requester
+    }
+    if (path === "/api/quotes/status" && req.method === "GET") {
+      if (!limiters.auth.check(`quote:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const q = await transact(p, (db) => lookupQuote(db, url.searchParams.get("ref") ?? "", url.searchParams.get("secret") ?? ""));
+      return q ? json(q) : notFound();
+    }
+    if (path === "/api/quotes/respond" && req.method === "POST") {
+      if (!limiters.auth.check(`quote:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const q = await transact(p, (db) => respondToQuote(db, str(body, "ref"), str(body, "secret"), bool(body, "accept")));
+      return q ? json(q) : notFound();
+    }
+
+    // Methods the owner allows (PAYMENT_METHODS, comma-separated; default all). Online methods also need a provider that supports them;
+    // bank transfer needs the owner's bank details to be configured — we never invent account details.
+    const allowed = (env.PAYMENT_METHODS ? env.PAYMENT_METHODS.split(",").map((x) => x.trim()).filter(isMethod) : ["card", "mobile_money", "bank_transfer"]) as PaymentMethod[];
+    const bankDetails = (env.BANK_TRANSFER_DETAILS ?? "").trim().slice(0, 600);
+    const methodsFor = (currency: "GHS" | "USD"): PaymentMethod[] => [
+      ...(provider ? provider.methods(currency).filter((m) => allowed.includes(m)) : []),
+      ...(bankDetails && allowed.includes("bank_transfer") ? (["bank_transfer"] as PaymentMethod[]) : []),
+    ];
+    if (path === "/api/rates" && req.method === "GET") {
+      // Public: only what the storefront needs to show converted prices honestly (rate, where it came from, and how old it is).
+      return json(await transact(p, (db) => { const { rate } = effectiveRate(db, env); return { displayMode: db.settings["displayMode"] ?? "DUAL", rate: rate ? { ghsPerUsdMicro: rate.ghsPerUsdMicro, source: rate.source, effectiveDate: rate.effectiveDate } : null }; }), 200, { "Cache-Control": "public, max-age=60" });
+    }
+    if (path === "/api/site" && req.method === "GET") return json(await transact(p, (db) => db.business), 200, { "Cache-Control": "public, max-age=300" });
+    if (path === "/api/payments/config" && req.method === "GET") {
+      const methods = { GHS: methodsFor("GHS"), USD: methodsFor("USD") };
+      return json({ enabled: methods.GHS.length + methods.USD.length > 0, methods, ...(provider ? { provider: provider.name } : {}) });
+    }
+    if ((path === "/api/payments/start" || path === "/api/payments/bank-transfer") && req.method === "POST") {
+      if (!limiters.auth.check(`pay:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const { actor } = await who();
+      const bank = path.endsWith("bank-transfer");
+      const method: PaymentMethod | undefined = bank ? "bank_transfer" : isMethod(body["method"]) ? body["method"] : undefined;
+      if (body["method"] !== undefined && !bank && !method) return json({ errors: ["Choose a valid payment method."] }, 422);
+      if (bank) {
+        const r = await transact(p, async (db) => {
+          const found = await orderForPayment(db, actor, str(body, "orderRef"), str(body, "trackingSecret"));
+          if (found && !("error" in found) && !methodsFor(found.order.currency).includes("bank_transfer")) return { error: "Bank transfer isn't available for this order." };
+          return found && "error" in found ? found : found ? beginBankTransfer(db, actor, str(body, "orderRef"), str(body, "trackingSecret"), Number(env.BANK_TRANSFER_HOLD_HOURS) || 24) : null;
+        });
+        if (!r) return notFound();
+        if ("error" in r) return json({ errors: [r.error] }, 409);
+        return json({ instructions: bankDetails, reference: r.order.ref, amount: r.order.total, currency: r.order.currency, holdUntil: r.order.reservedUntil });
+      }
+      if (!provider) return json({ errors: ["Online payment isn't available yet. The business will contact you to arrange payment."] }, 503);
+      const found = await transact(p, (db) => orderForPayment(db, actor, str(body, "orderRef"), str(body, "trackingSecret")));
+      if (!found) return notFound();
+      if ("error" in found) return json({ errors: [found.error] }, 409);
+      const online: PaymentMethod[] = methodsFor(found.order.currency).filter((m) => m !== "bank_transfer");
+      if (!online.length) return json({ errors: ["Online payment isn't available for this currency."] }, 503);
+      if (method && !online.includes(method)) return json({ errors: [`That payment method isn't available for ${found.order.currency} orders.`] }, 422);
+      // Amount and currency come from OUR stored order — never from the request.
+      const init = await provider.initialize({ orderRef: found.order.ref, amount: found.order.total, currency: found.order.currency, email: found.email, callbackUrl: `${env.SITE_ORIGIN.replace(/\/+$/, "")}/track?ref=${encodeURIComponent(found.order.ref)}`, ...(method === "card" || method === "mobile_money" ? { method } : {}) });
+      if (init.ok && method) await transact(p, (db) => { const o = [...db.orders.values()].find((x) => x.ref === found.order.ref); if (o && o.status === "pending_payment") o.paymentMethod = method; });
+      return init.ok ? json({ redirectUrl: init.redirectUrl }) : json({ errors: [init.error] }, 502);
+    }
+    if (path === "/api/checkout" && req.method === "POST") {
+      const { actor } = await who();
+      const cur = str(body, "currency"); if (cur !== "GHS" && cur !== "USD") return json({ error: "Unsupported currency" }, 422);
+      const lines = Array.isArray(body["lines"]) ? (body["lines"] as Body[]).map((l) => ({ variantId: str(l, "variantId"), qty: num(l, "qty") })) : [];
+      const a = (body["address"] && typeof body["address"] === "object" ? body["address"] : {}) as Body;
+      const guestEmail = str(body, "guestEmail");
+      const r = await transact(p, (db) => placeOrder(db, {
+        ...(actor?.kind === "customer" ? { userId: actor.id } : {}), ...(actor?.kind !== "customer" && guestEmail ? { guestEmail } : {}),
+        lines, currency: cur as Currency, region: str(body, "region"), zoneId: str(body, "zoneId"),
+        address: { recipient: str(a, "recipient"), region: str(a, "region"), city: str(a, "city"), street: str(a, "street"), ...(str(a, "phone") ? { phone: str(a, "phone") } : {}) },
+        ...(str(body, "discountCode") ? { discountCode: str(body, "discountCode") } : {}), idempotencyKey: str(body, "idempotencyKey"), acceptedTerms: bool(body, "acceptedTerms"), preorderAcknowledged: bool(body, "preorderAcknowledged"),
+      }));
+      if (!r.ok) return json({ errors: r.errors }, 422);
+      if (!r.duplicate) { const to = await transact(p, (db) => (r.order.guestEmail ?? (r.order.userId ? db.users.get(r.order.userId)?.email : undefined))); if (to) await deps.notify?.(to, "order_received", { ref: r.order.ref }); }
+      return json({ order: orderView(r.order), ...(r.trackingSecret ? { trackingSecret: r.trackingSecret } : {}), paymentRequired: true, paymentAvailable: methodsFor(r.order.currency).length > 0, paymentMethods: methodsFor(r.order.currency) }, r.duplicate ? 200 : 201);
+    }
+    if (path === "/api/track" && req.method === "GET") {
+      if (!limiters.auth.check(`track:${ip}`).allowed) return json({ error: "Too many requests" }, 429);
+      const t = await transact(p, (db) => trackOrder(db, url.searchParams.get("ref") ?? "", url.searchParams.get("secret") ?? ""));
+      return t ? json(t) : notFound();
+    }
+    if (path === "/api/support" && req.method === "POST") {
+      const { actor } = await who();
+      try { const t = await transact(p, (db) => openTicket(db, actor, { email: str(body, "email"), subject: str(body, "subject"), body: str(body, "body") })); return json({ id: t.id }, 201); } catch { return json({ error: "Email, subject and message are required." }, 422); }
+    }
+
+    /* ---------- signed-in customer routes ---------- */
+    const { actor } = await who();
+    if (path.startsWith("/api/") && ["/api/me", "/api/orders", "/api/account"].some((x) => path === x || path.startsWith(x + "/"))) {
+      if (!actor || actor.kind !== "customer") return json({ error: "Not signed in" }, 401);
+      if (path === "/api/me") return json(await transact(p, (db) => getProfile(db, actor)));
+      if (path === "/api/account/tickets" && req.method === "GET") return json(await transact(p, (db) => myTickets(db, actor)));
+      if (path === "/api/orders" && req.method === "GET") return json(await transact(p, (db) => listOrdersForCustomer(db, actor).map(orderView)));
+      const m = /^\/api\/orders\/([^/]+)(\/cancel)?$/.exec(path);
+      if (m) {
+        const id = m[1]!;
+        if (m[2] && req.method === "POST") { const r = await transact(p, (db) => requestCancellation(db, actor, id)); return r.ok ? json({ ok: true }) : json({ error: r.error }, 404); }
+        if (!m[2] && req.method === "GET") { const o = await transact(p, (db) => getOrderForCustomer(db, actor, id)); return o ? json(orderView(o)) : notFound(); }
+      }
+      try {
+        if (path === "/api/account/profile" && req.method === "POST") { await transact(p, (db) => updateProfile(db, actor, body as never)); return json({ ok: true }); }
+        if (path === "/api/account/addresses" && req.method === "GET") return json(await transact(p, (db) => listAddresses(db, actor)));
+        if (path === "/api/account/addresses" && req.method === "POST") return json(await transact(p, (db) => addAddress(db, actor, body as never)), 201);
+        if (path === "/api/account/cart" && req.method === "GET") return json(await transact(p, (db) => { const ok = new Set(publicProducts(db).map((x) => x.variantId)); return getCart(db, actor).filter((l) => ok.has(l.variantId)); }));
+        if (path === "/api/account/cart" && req.method === "PUT") return json(await transact(p, (db) => saveCart(db, actor, body["lines"], new Set(publicProducts(db).map((x) => x.variantId)))));
+        if (path === "/api/account/wishlist" && req.method === "GET") {
+          return json(await transact(p, (db) => { const saved = db.wishlist.get(actor.id) ?? new Set<string>(); return publicProducts(db).filter((x) => { const row = [...db.products.values()].find((pr) => pr.slug === x.slug); return !!row && saved.has(row.id); }).map((x) => x.slug); }));
+        }
+        if (path === "/api/account/wishlist" && req.method === "POST") {
+          const slug = str(body, "slug"), on = bool(body, "on");
+          const r = await transact(p, (db) => { const row = publicProducts(db).some((x) => x.slug === slug) ? [...db.products.values()].find((pr) => pr.slug === slug) : undefined; if (!row) return null; return setWishlist(db, actor, row.id, on); });
+          return r === null ? notFound() : json({ ok: true, count: r });
+        }
+        if (path === "/api/account/export" && req.method === "GET") return json(await transact(p, (db) => exportMyData(db, actor)));
+        if (path === "/api/account/delete" && req.method === "POST") {
+          await transact(p, (db) => deleteMyAccount(db, actor)); return json({ ok: true }, 200, { "Set-Cookie": sessionCookie("", 0) });
+        }
+      } catch (e) { return mapError(e); }
+    }
+    return notFound();
+  } catch (e) {
+    return mapError(e);
+  }
+}
+
+function mapError(e: unknown): Response {
+  if (e instanceof Forbidden) return json({ error: e.message }, 403);
+  if (e instanceof ValidationError) return json({ errors: e.errors }, 422);
+  if (e instanceof ConflictError) return json({ error: e.message }, 409);
+  if (e instanceof Error && /Not signed in/.test(e.message)) return json({ error: "Not signed in" }, 401);
+  return json({ error: "Something went wrong" }, 500); // never leak internals
 }

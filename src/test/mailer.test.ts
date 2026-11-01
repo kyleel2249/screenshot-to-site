@@ -5,7 +5,7 @@ const env = { SITE_ORIGIN: "https://shop.test/", EMAIL_API_KEY: "key_123", EMAIL
 
 describe("mailer", () => {
   test("links point at the configured site, encode the token, and html is escaped", () => {
-    for (const [t, path] of [["verify_email", "/verify-email"], ["owner_verify", "/verify-email"], ["password_reset", "/reset-password"], ["staff_invite", "/accept-invite"]] as const) {
+    for (const [t, path] of [["verify_email", "/verify-email"], ["password_reset", "/reset-password"]] as const) {
       const m = buildMessage(env, "a@x.com", t, "a b&c");
       expect(m.text).toContain(`https://shop.test${path}?token=a%20b%26c`); expect(m.html).toContain(`href="https://shop.test${path}?token=a%20b%26c"`); expect(m.subject).toMatch(/Dera Darko Trade/);
     }
@@ -22,7 +22,7 @@ describe("mailer", () => {
   });
   test("provider errors and network failures never throw and never log the token", async () => {
     const logs: string[] = [];
-    await createMailer(env, async () => new Response("no", { status: 500 }), (m) => logs.push(m))!("u@x.com", "staff_invite", { token: "SECRET-TOKEN" });
+    await createMailer(env, async () => new Response("no", { status: 500 }), (m) => logs.push(m))!("u@x.com", "password_reset", { token: "SECRET-TOKEN" });
     await createMailer(env, async () => { throw new Error("down SECRET-TOKEN"); }, (m) => logs.push(m))!("u@x.com", "password_reset", { token: "SECRET-TOKEN" });
     expect(logs).toHaveLength(2); expect(logs.join(" ")).not.toContain("SECRET-TOKEN");
   });

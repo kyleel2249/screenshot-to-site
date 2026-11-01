@@ -259,7 +259,8 @@ export function ProductWorkspace({
         priceGhs: ghs,
         priceUsd: usd,
         onHand: parseInt(form.onHand, 10) || 0,
-        published: form.published,
+        // A product can only go live with a price; without one it is saved as a draft instead of failing.
+        published: form.published && (ghs !== undefined || usd !== undefined),
         availability: form.availability,
       });
 
@@ -412,6 +413,9 @@ export function ProductWorkspace({
           <label className="flex items-center gap-2 text-sm sm:col-span-2">
             <input type="checkbox" checked={form.published} onChange={(e) => setForm((f) => ({ ...f, published: e.target.checked }))} />
             Publish immediately
+            {form.published && !form.priceGhsMajor.trim() && !form.priceUsdMajor.trim() && (
+              <span className="text-xs text-muted-foreground">(needs a price, otherwise it is saved as a draft)</span>
+            )}
           </label>
           <div className="sm:col-span-2 flex flex-wrap gap-2 pt-2">
             <button type="submit" disabled={locked} className="btn-primary">

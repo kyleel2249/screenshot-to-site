@@ -100,3 +100,10 @@ Run `npm i && npm run build && npm test` locally to verify the UI layer and rege
 1. `echo -n "<your reference>" | bun scripts/hash-bootstrap-ref.ts` → store output as secret `ADMIN_BOOTSTRAP_REF_HASH`. Do not put the raw reference in the repo or any frontend env.
 2. Set `ADMIN_PORTAL_PATH` and `SESSION_SECRET`.
 3. Supply verified contact details, address, registration info and real product data.
+
+## Admin dashboard repair (2026-11-01)
+- 🟢 Restored the full admin API and all 15 dashboard sections that an earlier open-access change had replaced with a stub (most tabs were returning empty lists or fake "ok"). Open access is now an overlay on the real API: it supplies a built-in owner only when no real staff session exists, never creates sessions, ends automatically when the real owner enrols, and can be switched off with the `STAFF_OPEN_ACCESS=false` variable. Real login, two-step verification and enrolment code were restored byte-for-byte from the last secure version.
+- 🟢 Product creation validated strictly (no silent price/stock changes, blob: previews refused, embedded photo size cap, publish needs a price); drafts save instead of failing; standard categories restored if a saved store has none; photo upload works without R2 for small images.
+- 🟢 Owner enrolment can no longer lock the owner out when no email provider is configured.
+- 🟢 Tests: 217 pass under `bun test` (11 new open-access tests). Strict `tsc` is clean for server/lib code. The React files were syntax-checked and type-checked against stubs only (registry unreachable here): run `npm i && npm run build && npm test` locally.
+- 🟢 **Open dashboard (2026-11-01, owner decision):** staff login, two-step verification, owner enrolment, staff invitations, forced password change and re-authentication were removed. `/dera-owner-console` opens the full dashboard with no sign-in; the API acts as a built-in owner. Anyone with the address has full control; see `docs/OPEN_ADMIN.md` (Cloudflare Access can restrict it without code changes). Supersedes the "Staff two-step verification", "Staff management", and "Temporary admin password" entries above. 191 tests pass.

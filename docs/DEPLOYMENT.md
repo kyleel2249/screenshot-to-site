@@ -20,11 +20,7 @@ tens of thousands is the point to move to the normalised schema in `db/migration
 
 ## 3. Secrets (never commit)
 ```
-echo -n "<owner enrolment reference>" | bun scripts/hash-bootstrap-ref.ts     # copy the hash
-wrangler secret put ADMIN_BOOTSTRAP_REF_HASH
-wrangler secret put ADMIN_PORTAL_PATH      # >=12 chars, [a-z0-9-], must not contain "admin"
 wrangler secret put SESSION_SECRET         # 32+ random bytes
-wrangler secret put DATA_ENCRYPTION_KEY    # 32+ random bytes; encrypts staff authenticator seeds. Keep it separate from SESSION_SECRET and never rotate without re-enrolling staff 2FA. Falls back to SESSION_SECRET if unset.
 wrangler secret put EMAIL_API_KEY          # optional until you choose a provider (Resend adapter built in)
 wrangler secret put EMAIL_FROM
 wrangler secret put PAYMENT_PROVIDER        # "paystack"
@@ -37,14 +33,10 @@ wrangler secret put BANK_TRANSFER_DETAILS
 ```
 `SITE_ORIGIN` (e.g. `https://deradarkotrade.com`) is a plain variable; it is the only origin allowed to make state-changing calls.
 
-## 4. First-run owner enrolment
-`POST https://<site>/<ADMIN_PORTAL_PATH>/api/enrol` with `{reference,email,password}`. It works once, only while no staff account exists, then
-closes permanently. Verify the owner email via the emailed link, then log in. The reference is never stored or logged.
-
-**Handing over with a temporary password.** Add `"temporaryPassword": true` to the enrol request (or tick "This is a temporary password" on the enrolment form). The account is then locked to a
-"Choose a new password" step: after sign-in, every dashboard call (including two-step setup) is refused with `password_change_required` until the owner sets their own password.
-The change needs the current password, follows the normal policy (12+ characters, upper and lower case, a number **and a symbol**), cannot equal the old password, and signs out all other sessions of that account.
-Send the temporary password over a different channel from the enrolment reference, and never commit it. It only has to survive until the first sign-in.
+## 4. Dashboard access (open, no login)
+The dashboard is at `/<your-domain>/dera-owner-console` and has **no sign-in, enrolment or two-step verification** (owner decision; see
+`OPEN_ADMIN.md`). Anyone who knows the address can manage the shop. To restrict it without code changes, put Cloudflare Access in front of
+`/dera-owner-console*`. Bind the D1 database first, otherwise nothing you enter is kept.
 
 ## 5. Build and deploy
 `src/server.ts` is already wired: with the `DB`, `SESSION_SECRET` and `SITE_ORIGIN` bindings present it routes everything through `src/server/edge.ts` (API, generated sitemap/robots, per-product SEO tags, security headers, CSP). Then:
@@ -71,15 +63,11 @@ Create an R2 bucket and bind it to the Worker as `MEDIA` (see `wrangler.example.
 
 | Path | Answered by |
 |---|---|
-| `/api/*`, `<ADMIN_PORTAL_PATH>/api/*` | API handler (`src/server/api.ts`) |
+| `/api/*`, `/dera-owner-console/api/*` | API handler (`src/server/api.ts`) |
 | `/sitemap.xml`, `/robots.txt` | generated (published products only) |
 | everything else | TanStack Start SSR, plus security headers; account/checkout/auth/tracking/portal pages are `no-store` + `noindex` |
 
 Without those bindings (plain `vite dev`) pages still render and `/api/*` returns 503. Delete `public/robots.txt` before deploying so the generated one (which carries the Sitemap line) is served. The nonce-based CSP is applied to every HTML page in **report-only** mode by default (the edge adds a fresh nonce to every `<script>` tag). After your first real deploy, browse the shop, checkout and portal, check the logs for `csp-violation` lines (browsers report to `/api/csp-report`), fix anything flagged, then set `CSP_MODE=enforce`. Cached public product pages reuse one nonce for their cache lifetime; that is acceptable because no page reflects user input.
-
-
-## Two-step verification recovery (owner)
-Every staff account must use an authenticator app. If the owner loses both the phone and the recovery codes, an operator with D1 access clears the owner's `mfa` field in the stored state (the `users` entry for the owner), after which the next sign-in forces a fresh setup. Other staff are reset by the owner from Dashboard → Staff → Reset 2-step. Keep the owner's recovery codes offline.
 
 
 ## Going live with Paystack

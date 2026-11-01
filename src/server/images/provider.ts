@@ -121,7 +121,7 @@ export class OpenAICompatibleImageProvider implements ImageGenerationProvider {
         provider: this.id,
         model: this.model,
         prompt: input.prompt,
-        revisedPrompt: item.revised_prompt,
+        ...(item.revised_prompt ? { revisedPrompt: item.revised_prompt } : {}),
         width: input.width,
         height: input.height,
         mimeType: "image/png",
@@ -138,8 +138,8 @@ export function createImageProviderFromEnv(env: {
   IMAGE_MODEL?: string;
 }): ImageGenerationProvider {
   return new OpenAICompatibleImageProvider({
-    apiKey: env.IMAGE_API_KEY,
-    baseUrl: env.IMAGE_API_BASE_URL,
-    model: env.IMAGE_MODEL,
+    ...(env.IMAGE_API_KEY ? { apiKey: env.IMAGE_API_KEY } : {}),
+    ...(env.IMAGE_API_BASE_URL ? { baseUrl: env.IMAGE_API_BASE_URL } : {}),
+    ...(env.IMAGE_MODEL ? { model: env.IMAGE_MODEL } : {}),
   });
 }

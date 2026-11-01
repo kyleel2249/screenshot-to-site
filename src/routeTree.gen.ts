@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as PortalRouteImport } from './routes/$portal'
 import { Route as AboutRouteImport } from './routes/about'
-import { Route as AcceptInviteRouteImport } from './routes/accept-invite'
 import { Route as AccountRouteImport } from './routes/account'
 import { Route as BestSellersRouteImport } from './routes/best-sellers'
 import { Route as CartRouteImport } from './routes/cart'
@@ -48,11 +47,6 @@ const PortalRoute = PortalRouteImport.update({
 const AboutRoute = AboutRouteImport.update({
   id: '/about',
   path: '/about',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AcceptInviteRoute = AcceptInviteRouteImport.update({
-  id: '/accept-invite',
-  path: '/accept-invite',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AccountRoute = AccountRouteImport.update({
@@ -165,7 +159,6 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/$portal': typeof PortalRoute
   '/about': typeof AboutRoute
-  '/accept-invite': typeof AcceptInviteRoute
   '/account': typeof AccountRoute
   '/best-sellers': typeof BestSellersRoute
   '/cart': typeof CartRoute
@@ -192,7 +185,6 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/$portal': typeof PortalRoute
   '/about': typeof AboutRoute
-  '/accept-invite': typeof AcceptInviteRoute
   '/account': typeof AccountRoute
   '/best-sellers': typeof BestSellersRoute
   '/cart': typeof CartRoute
@@ -220,7 +212,6 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/$portal': typeof PortalRoute
   '/about': typeof AboutRoute
-  '/accept-invite': typeof AcceptInviteRoute
   '/account': typeof AccountRoute
   '/best-sellers': typeof BestSellersRoute
   '/cart': typeof CartRoute
@@ -249,7 +240,6 @@ export interface FileRouteTypes {
     | '/'
     | '/$portal'
     | '/about'
-    | '/accept-invite'
     | '/account'
     | '/best-sellers'
     | '/cart'
@@ -276,7 +266,6 @@ export interface FileRouteTypes {
     | '/'
     | '/$portal'
     | '/about'
-    | '/accept-invite'
     | '/account'
     | '/best-sellers'
     | '/cart'
@@ -303,7 +292,6 @@ export interface FileRouteTypes {
     | '/'
     | '/$portal'
     | '/about'
-    | '/accept-invite'
     | '/account'
     | '/best-sellers'
     | '/cart'
@@ -331,7 +319,6 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   PortalRoute: typeof PortalRoute
   AboutRoute: typeof AboutRoute
-  AcceptInviteRoute: typeof AcceptInviteRoute
   AccountRoute: typeof AccountRoute
   BestSellersRoute: typeof BestSellersRoute
   CartRoute: typeof CartRoute
@@ -376,13 +363,6 @@ declare module '@tanstack/react-router' {
       path: '/about'
       fullPath: '/about'
       preLoaderRoute: typeof AboutRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/accept-invite': {
-      id: '/accept-invite'
-      path: '/accept-invite'
-      fullPath: '/accept-invite'
-      preLoaderRoute: typeof AcceptInviteRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/account': {
@@ -539,7 +519,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   PortalRoute: PortalRoute,
   AboutRoute: AboutRoute,
-  AcceptInviteRoute: AcceptInviteRoute,
   AccountRoute: AccountRoute,
   BestSellersRoute: BestSellersRoute,
   CartRoute: CartRoute,

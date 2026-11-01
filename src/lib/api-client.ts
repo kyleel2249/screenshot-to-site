@@ -56,7 +56,6 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     requestQuote: (b: { business?: string; contactName: string; email: string; phone?: string; region: string; notes?: string; items: { description: string; qty: number }[] }) => post<{ ref: string; secret: string }>("/api/quotes", b),
     quoteStatus: (ref: string, secret: string) => get<QuoteView>(`/api/quotes/status?ref=${encodeURIComponent(ref)}&secret=${encodeURIComponent(secret)}`),
     respondToQuote: (ref: string, secret: string, accept: boolean) => post<QuoteView>("/api/quotes/respond", { ref, secret, accept }),
-    acceptInvite: (token: string, password: string) => post<{ ok: true }>("/api/staff/accept-invite", { token, password }),
     verifyEmail: (token: string) => post<{ ok: true }>("/api/verify-email", { token }),
     login: (email: string, password: string) => post<{ ok: true }>("/api/login", { email, password }),
     logout: () => post<{ ok: true }>("/api/logout"),
@@ -83,15 +82,9 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
     startBankTransfer: (orderRef: string, trackingSecret?: string) => post<BankTransferInstructions>("/api/payments/bank-transfer", { orderRef, ...(trackingSecret ? { trackingSecret } : {}) }),
     track: (ref: string, secret: string) => get<TrackResult>(`/api/track?ref=${encodeURIComponent(ref)}&secret=${encodeURIComponent(secret)}`),
     admin: (portal: string) => ({
-      enrol: (b: { reference: string; email: string; password: string; temporaryPassword?: boolean }) => post<{ ok: true }>(`${portal}/api/enrol`, b),
-      me: () => get<{ id: string; roles: string[]; mfa: "setup_required" | "code_required" | "verified"; mustChangePassword?: boolean }>(`${portal}/api/me`),
-      changePassword: (b: { currentPassword: string; newPassword: string }) => post<{ ok: true }>(`${portal}/api/password/change`, b),
-      mfaSetup: () => post<{ secret: string; otpauth: string }>(`${portal}/api/mfa/setup`),
-      mfaConfirm: (code: string) => post<{ recoveryCodes: string[] }>(`${portal}/api/mfa/confirm`, { code }),
-      mfaVerify: (code: string) => post<{ ok: true }>(`${portal}/api/mfa/verify`, { code }),
-      resetStaffMfa: (userId: string) => post(`${portal}/api/staff/mfa-reset`, { userId }),
+      me: () => get<{ id: string; roles: string[]; storage?: "memory" | "database" }>(`${portal}/api/me`),
       products: () => get<AdminProduct[]>(`${portal}/api/products`),
-      createProduct: (b: Record<string, unknown>) => post<{ id: string; slug: string }>(`${portal}/api/products`, b),
+      createProduct: (b: Record<string, unknown>) => post<{ id: string; slug: string; published?: boolean }>(`${portal}/api/products`, b),
       setStatus: (ids: string[], availability: Availability) => post(`${portal}/api/products/status`, { ids, availability }),
       importProducts: (csv: string, dryRun: boolean) => post<{ dryRun: boolean; count: number; created: { row: number; name: string; sku: string }[] }>(`${portal}/api/products/import`, { csv, dryRun }),
       setAttributes: (productId: string, attributes: Record<string, string>) => post<{ attributes: Record<string, string> }>(`${portal}/api/products/attributes`, { productId, attributes }),
@@ -100,7 +93,6 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
       adjustStock: (variantId: string, delta: number, reason: string) => post(`${portal}/api/stock`, { variantId, delta, reason }),
       orders: () => get<AdminOrder[]>(`${portal}/api/orders`),
       setOrderStatus: (orderId: string, to: string, note?: string) => post(`${portal}/api/orders/status`, { orderId, to, ...(note ? { note } : {}) }),
-      reauth: (password: string) => post(`${portal}/api/reauth`, { password }),
       refund: (orderId: string, amount: number) => post<{ amount: number; currency: string }>(`${portal}/api/refunds`, { orderId, amount }),
       categories: () => get<CategoryNode[]>(`${portal}/api/categories`),
       addCategory: (name: string, parentId: string | null, filterProfile?: FilterProfile) => post(`${portal}/api/categories`, { name, ...(parentId ? { parentId } : {}), ...(filterProfile ? { filterProfile } : {}) }),
@@ -149,10 +141,6 @@ export function createClient(opts: { base?: string; fetchImpl?: Fetch; origin?: 
       resetPage: (slug: string) => post(`${portal}/api/pages/reset`, { slug }),
       quotes: () => get<AdminQuote[]>(`${portal}/api/quotes`),
       sendQuote: (id: string, b: { currency: Currency; total: number; validDays: number; message?: string }) => post(`${portal}/api/quotes/send`, { id, ...b }),
-      staff: () => get<StaffMember[]>(`${portal}/api/staff`),
-      inviteStaff: (email: string, roles: string[]) => post(`${portal}/api/staff/invite`, { email, roles }),
-      setStaffRoles: (userId: string, roles: string[]) => post(`${portal}/api/staff/roles`, { userId, roles }),
-      setStaffActive: (userId: string, active: boolean) => post(`${portal}/api/staff/active`, { userId, active }),
       tickets: () => get<Ticket[]>(`${portal}/api/tickets`),
       replyTicket: (ticketId: string, body: string, internal = false) => post(`${portal}/api/tickets/reply`, { ticketId, body, internal }),
       setTicketStatus: (ticketId: string, status: Ticket["status"]) => post(`${portal}/api/tickets/status`, { ticketId, status }),
@@ -184,7 +172,6 @@ export interface Overview {
 }
 export interface Supplier { id: string; name: string; contact: string; email: string; phone: string; country: string; notes: string; active: boolean }
 export interface PurchaseOrder { id: string; ref: string; supplierId: string; supplier: string; status: "draft" | "ordered" | "partially_received" | "received" | "cancelled"; currency: string; lines: { variantId: string; name: string; qty: number; unitCost: number; received: number }[]; expectedAt?: string; notes: string; createdAt: number; receipts: { at: number; by: string; lines: { variantId: string; qty: number }[] }[] }
-export interface StaffMember { id: string; email: string; roles: string[]; state: "active" | "invited" | "suspended"; createdAt: number }
 export interface Ticket { id: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: string; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }
 export interface Analytics { days: number; funnel: { productViews: number; addToCart: number; checkoutStarts: number; paidOrders: number }; revenue: Record<string, { gross: number; refunds: number; net: number; orders: number }> }
 export interface AdminZone { id: string; name: string; regions: string[]; currency: Currency; baseFee: number; perKgFee: number; freeOver?: number; estimate: string; quotationOnly?: boolean }

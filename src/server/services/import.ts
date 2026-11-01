@@ -33,7 +33,7 @@ export function importProducts(db: MemoryDb, actor: Actor | null, csv: unknown, 
   const existing = new Set([...db.variants.values()].map((v) => (v.id.split("::")[1] ?? "").toLowerCase()));
   const errors: string[] = [], seen = new Set<string>(), inputs: { row: number; input: NewProduct }[] = [];
   rows.forEach((r, idx) => {
-    const n = idx + 2, bad = (m: string) => errors.push(`Row ${n}: ${m}`);
+    const n = idx + 2, bad = (m: string): void => { errors.push(`Row ${n}: ${m}`); };
     const sku = col(r, "sku"), cat = col(r, "category").toLowerCase();
     if (!sku) return bad("sku is required."); if (seen.has(sku.toLowerCase())) return bad(`sku "${sku}" appears more than once in the file.`); seen.add(sku.toLowerCase()); if (existing.has(sku.toLowerCase())) return bad(`SKU "${sku}" already exists in your catalogue.`);
     let categoryId = catByKey.get(cat); if (!categoryId) { const named = byName.get(cat); if (named?.length === 1) categoryId = named[0]; else if (named && named.length > 1) return bad(`category "${col(r, "category")}" matches several categories; use its id or slug.`); }

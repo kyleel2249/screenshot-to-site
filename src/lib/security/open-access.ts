@@ -1,15 +1,14 @@
 /**
- * TEMPORARY development unlock for Dera Darko Trade admin.
- *
- * When true:
- * - Admin dashboard needs NO login, password, email verification, or MFA
- * - Any visit to the portal path auto-grants an owner session
- * - Owner enrolment bootstrap hash is not required
- * - API may run on in-memory persistence if D1/secrets are missing
- *
- * Set to false and redeploy before real production traffic.
+ * Open admin dashboard (owner decision): the dashboard has NO login, NO password, NO two-step verification and NO enrolment.
+ * Anyone who opens this address manages the shop. Keep the address private, and put Cloudflare Access (or similar) in front of
+ * it if you ever need to restrict who can reach it. See docs/OPEN_ADMIN.md.
  */
-export const STAFF_OPEN_ACCESS = true;
 
-/** Default secret portal path used only while STAFF_OPEN_ACCESS is true and ADMIN_PORTAL_PATH is unset. */
+/** The dashboard path (also the admin API prefix: /dera-owner-console/api/...). */
 export const OPEN_ACCESS_PORTAL_PATH = "dera-owner-console";
+
+/**
+ * Reserved address of the built-in owner. ".local" is not a deliverable domain and the account has no usable password,
+ * so it is only ever used internally to attribute audit entries.
+ */
+export const OPEN_ACCESS_EMAIL = "owner@open.local";

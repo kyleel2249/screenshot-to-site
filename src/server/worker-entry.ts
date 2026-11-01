@@ -1,7 +1,7 @@
 /**
  * Cloudflare Worker / Pages Function adapter.
  *   - Bind a D1 database as `DB` and set the secrets listed in .env.example.
- *   - Route /api/* and `${ADMIN_PORTAL_PATH}/api/*` to this handler.
+ *   - Route /api/* and `/dera-owner-console/api/*` to this handler.
  * Not yet wired into the TanStack Start build (that needs a local `npm run build` to verify) — see docs/DEPLOYMENT.md.
  */
 import { handle, type Deps, type Env } from "./api";

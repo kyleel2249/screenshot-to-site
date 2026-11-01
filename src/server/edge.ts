@@ -5,7 +5,7 @@
  * CSP is intentionally NOT applied here: a nonce-based policy must be injected with the framework's script tags and can only
  * be validated in a real build (see docs/DEPLOYMENT.md). Every other hardening header is applied.
  */
-import { resolvePortalPath } from "../lib/security/enrolment";
+import { OPEN_ACCESS_PORTAL_PATH } from "../lib/security/open-access";
 import { addNonceToScripts, buildCsp, newNonce, NO_STORE } from "../lib/security/headers";
 import { buildRobots, buildSitemap } from "../lib/seo/sitemap";
 import { SEED_CATEGORIES } from "../lib/domain/categories";
@@ -24,7 +24,7 @@ const BASE_HEADERS: Record<string, string> = {
   "X-Frame-Options": "DENY",
   "Cross-Origin-Opener-Policy": "same-origin",
 };
-const PRIVATE_PAGES = /^\/(cart|checkout|account|login|register|forgot-password|reset-password|verify-email|accept-invite|quote-status|track)(\/|$)/;
+const PRIVATE_PAGES = /^\/(cart|checkout|account|login|register|forgot-password|reset-password|verify-email|quote-status|track)(\/|$)/;
 
 export function withHeaders(res: Response, extra: Record<string, string> = {}): Response {
   const out = new Response(res.body, res);
@@ -48,7 +48,7 @@ async function withCsp(res: Response, env: Env): Promise<Response> {
 export async function route(req: Request, env: Env, persistence: Persistence, ssr: (r: Request) => Promise<Response> | Response, deps: Deps = {}): Promise<Response> {
   const url = new URL(req.url);
   const path = url.pathname;
-  const portal = resolvePortalPath(env);
+  const portal = `/${OPEN_ACCESS_PORTAL_PATH}`;
   const isPortal = !!portal && (path === portal || path.startsWith(`${portal}/`));
 
   if (path === "/api/csp-report" && req.method === "POST") {
