@@ -1,6 +1,14 @@
 /**
- * TEMP open-access API: admin dashboard needs no login.
- * Supports catalogue list/create/publish/seed + product image upload.
+ * API dispatcher.
+ *
+ *  - Under the portal path while STAFF_OPEN_ACCESS is on (TEMP): the open-access admin block below (no login; catalogue
+ *    list/create/publish/seed + product image upload). It deliberately exposes NO customer data and NO order/payment mutations.
+ *  - `/api/guest/*`: the anonymous-session customer dashboard layer (`./guest`).
+ *  - Everything else: the complete authenticated API in `./api-full-impl` (public catalogue, checkout, tracking, support, payments,
+ *    customer accounts and — when STAFF_OPEN_ACCESS is false — the secret-path staff API with MFA and RBAC).
+ *
+ * To lock down for production set STAFF_OPEN_ACCESS = false (src/lib/security/open-access.ts): the dispatcher then sends the
+ * portal path to the full authenticated API as well. See docs/OPEN_ADMIN.md.
  */
 import { STAFF_OPEN_ACCESS } from "../lib/security/open-access";
 import { resolvePortalPath } from "../lib/security/enrolment";
@@ -15,40 +23,11 @@ import { openAccessActor } from "./open-access-actor";
 import { createProduct, setPublishedState, ValidationError } from "./services/catalog-admin";
 import type { Availability } from "../lib/domain/status";
 
-export interface Env {
-  SESSION_SECRET: string; SITE_ORIGIN: string; ADMIN_BOOTSTRAP_REF_HASH?: string; ADMIN_PORTAL_PATH?: string;
-  EMAIL_API_KEY?: string; EMAIL_FROM?: string; PAYMENT_WEBHOOK_SECRET?: string; PAYMENT_PROVIDER?: string; PAYMENT_SECRET_KEY?: string;
-  BANK_TRANSFER_DETAILS?: string; BANK_TRANSFER_HOLD_HOURS?: string; PAYMENT_METHODS?: string; PBKDF2_ITERATIONS?: string;
-  DATA_ENCRYPTION_KEY?: string; CSP_MODE?: string; MAINTENANCE_KEY?: string; MEDIA?: R2Like;
-  EXCHANGE_RATE_GHS_PER_USD?: string; EXCHANGE_RATE_SOURCE?: string; EXCHANGE_RATE_DATE?: string;
-  DEV_OPEN_ADMIN?: string;
-}
-export type NoticeTemplate = "order_received" | "order_update" | "payment_received" | "quote_ready" | "ticket_reply";
-export interface Deps {
-  payments?: unknown;
-  notify?: ((to: string, template: NoticeTemplate, data: { ref: string; subject?: string }) => Promise<void>) | undefined;
-  mail?: ((to: string, template: "verify_email" | "password_reset" | "owner_verify" | "staff_invite", data: { token: string }) => Promise<void>) | undefined;
-}
+import { handle as handleFull, publicProducts, effectiveRate, type Env, type Deps, type NoticeTemplate } from "./api-full-impl";
+import { handleGuest } from "./guest";
 
-export function publicProducts(db: MemoryDb, _now = new Date()) {
-  const out: unknown[] = [];
-  for (const p of db.products.values()) {
-    if (p.archived) continue;
-    const v = [...db.variants.values()].find((x) => x.productId === p.id);
-    if (!v || !v.published) continue;
-    out.push({
-      slug: p.slug, name: p.name, categoryId: p.categoryId, createdAt: p.createdAt, shortDescription: p.shortDescription,
-      image: p.image, imageAlt: p.imageAlt, availability: v.availability, labels: [], price: v.price, salePrice: v.salePrice ?? null,
-      variantId: v.id, attributes: p.attributes ?? {},
-    });
-  }
-  return out;
-}
-
-export function effectiveRate(db: MemoryDb, _env: Env) {
-  if (db.exchangeRate) return { rate: db.exchangeRate, fromConfig: false };
-  return { rate: null, fromConfig: false };
-}
+export { publicProducts, effectiveRate };
+export type { Env, Deps, NoticeTemplate };
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", "X-Content-Type-Options": "nosniff" } });
@@ -101,32 +80,32 @@ const SAMPLE_SEED: {
   { name: "Ceramic Sink", sku: "DDT-060", categoryId: "cat-building-materials-and-fixtures--sinks", shortDescription: "Bathroom ceramic sink.", image: "/products/DDT-060.png", imageAlt: "Ceramic Sink", priceGhs: 45000, priceUsd: 4000, onHand: 8, published: true },
 ];
 
-export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps = {}): Promise<Response> {
+/** Customer-facing traffic: the guest dashboard layer first, then the full API. Neither needs the open-access admin block. */
+async function handleCustomerSide(req: Request, env: Env, p: Persistence, deps: Deps): Promise<Response> {
+  const guest = await handleGuest(req, env, p, deps);
+  return guest ?? handleFull(req, env, p, deps);
+}
+
+export async function handle(req: Request, env: Env, p: Persistence, deps: Deps = {}): Promise<Response> {
+  if (!STAFF_OPEN_ACCESS) return handleCustomerSide(req, env, p, deps); // production: the full API owns the portal path too
   const url = new URL(req.url);
   const path = url.pathname.replace(/\/+$/, "") || "/";
-  const portal = resolvePortalPath(env) ?? (STAFF_OPEN_ACCESS ? "/dera-owner-console" : null);
+  const portal = resolvePortalPath(env) ?? "/dera-owner-console";
+  const underPortal = path === `${portal}/api` || path.startsWith(`${portal}/api/`);
 
   const mediaMatch = path.match(/^\/media\/([a-f0-9]{32}\.(?:jpg|png|webp|gif))$/i);
   if (mediaMatch && req.method === "GET") {
     return serveImage(env.MEDIA, mediaMatch[1]!);
   }
+  if (!underPortal) return handleCustomerSide(req, env, p, deps); // body untouched: the delegate reads it
 
   let body: Record<string, unknown> = {};
-  const isMediaUpload =
-    STAFF_OPEN_ACCESS &&
-    portal &&
-    path === `${portal}/api/media` &&
-    req.method === "POST";
+  const isMediaUpload = path === `${portal}/api/media` && req.method === "POST";
   if (!isMediaUpload && req.method !== "GET" && req.method !== "HEAD") {
     try { body = (await req.json()) as Record<string, unknown>; } catch { body = {}; }
   }
 
-  if (path === "/api/products" && req.method === "GET") return json(await transact(p, (db) => publicProducts(db)));
-  if (path === "/api/categories" && req.method === "GET") return json(await transact(p, (db) => ensureCategories(db).filter((c) => c.published)));
-  if (path === "/api/site" && req.method === "GET") return json(await transact(p, (db) => db.business ?? { name: "Dera Darko Trade" }));
-  if (path === "/api/rates" && req.method === "GET") return json({ displayMode: "DUAL", rate: null });
-
-  if (STAFF_OPEN_ACCESS && portal && (path === `${portal}/api` || path.startsWith(`${portal}/api/`))) {
+  if (underPortal) {
     const sub = path.slice(portal.length + 4) || "/";
     const open = await transact(p, (db) => openAccessActor(db));
     if (!open) return json({ error: "Not found" }, 404);
@@ -186,7 +165,7 @@ export async function handle(req: Request, env: Env, p: Persistence, _deps: Deps
             shortDescription: String(body.shortDescription ?? name),
             description: body.description ? String(body.description) : undefined,
             image,
-            imageAlt: String(body.imageAlt ?? name || "Product"),
+            imageAlt: String(body.imageAlt ?? (name || "Product")),
             sku,
             priceGhs,
             priceUsd,

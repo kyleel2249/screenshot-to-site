@@ -20,6 +20,7 @@ import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as DealsRouteImport } from './routes/deals'
 import { Route as FaqRouteImport } from './routes/faq'
+import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as FeaturedRouteImport } from './routes/featured'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as LoginRouteImport } from './routes/login'
@@ -88,6 +89,11 @@ const DealsRoute = DealsRouteImport.update({
 const FaqRoute = FaqRouteImport.update({
   id: '/faq',
   path: '/faq',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FeaturedRoute = FeaturedRouteImport.update({
@@ -173,6 +179,7 @@ export interface FileRoutesByFullPath {
   '/contact': typeof ContactRoute
   '/deals': typeof DealsRoute
   '/faq': typeof FaqRoute
+  '/dashboard': typeof DashboardRoute
   '/featured': typeof FeaturedRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
@@ -200,6 +207,7 @@ export interface FileRoutesByTo {
   '/contact': typeof ContactRoute
   '/deals': typeof DealsRoute
   '/faq': typeof FaqRoute
+  '/dashboard': typeof DashboardRoute
   '/featured': typeof FeaturedRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
@@ -228,6 +236,7 @@ export interface FileRoutesById {
   '/contact': typeof ContactRoute
   '/deals': typeof DealsRoute
   '/faq': typeof FaqRoute
+  '/dashboard': typeof DashboardRoute
   '/featured': typeof FeaturedRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/login': typeof LoginRoute
@@ -257,6 +266,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/deals'
     | '/faq'
+    | '/dashboard'
     | '/featured'
     | '/forgot-password'
     | '/login'
@@ -284,6 +294,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/deals'
     | '/faq'
+    | '/dashboard'
     | '/featured'
     | '/forgot-password'
     | '/login'
@@ -311,6 +322,7 @@ export interface FileRouteTypes {
     | '/contact'
     | '/deals'
     | '/faq'
+    | '/dashboard'
     | '/featured'
     | '/forgot-password'
     | '/login'
@@ -339,6 +351,7 @@ export interface RootRouteChildren {
   ContactRoute: typeof ContactRoute
   DealsRoute: typeof DealsRoute
   FaqRoute: typeof FaqRoute
+  DashboardRoute: typeof DashboardRoute
   FeaturedRoute: typeof FeaturedRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
   LoginRoute: typeof LoginRoute
@@ -432,6 +445,13 @@ declare module '@tanstack/react-router' {
       path: '/faq'
       fullPath: '/faq'
       preLoaderRoute: typeof FaqRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/featured': {
@@ -547,6 +567,7 @@ const rootRouteChildren: RootRouteChildren = {
   ContactRoute: ContactRoute,
   DealsRoute: DealsRoute,
   FaqRoute: FaqRoute,
+  DashboardRoute: DashboardRoute,
   FeaturedRoute: FeaturedRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
   LoginRoute: LoginRoute,

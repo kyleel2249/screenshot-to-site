@@ -28,3 +28,21 @@ Unauthenticated or non-staff requests receive a plain 404. Authorisation is chec
 `POST /enrol` (one-time), `POST /reauth`, `POST /products`, `POST /products/status` (bulk, all-or-nothing), `POST /products/publish`,
 `POST /prices`, `POST /stock`, `GET /orders`, `POST /orders/status`, `POST /refunds` (+ recent re-auth), `POST /refunds/complete`,
 `GET /export/orders.csv` (+ recent re-auth), `GET /audit`.
+
+## Anonymous guest dashboard (`/api/guest/*`)
+No login. `GET /api/guest/session` issues a signed `ddt_guest` cookie (HttpOnly, Secure, SameSite=Strict, 30-day sliding expiry); nothing is stored until the first write.
+All writes require same-origin `Origin` (CSRF) and are rate-limited (general 240/min, sensitive 12/min, writes 6/10 min). Without a valid session: `401 {"error":"no_session"}`.
+
+| Endpoint | Notes |
+|---|---|
+| `GET /track?ref=&secret=` | No session needed. Wrong code and unknown ref give identical 404s. No street/phone/email in the view. |
+| `GET /promotions` | Real sale prices inside their sale window only. |
+| `GET /session`, `GET /recommendations?slug=` | Rule-based; session signals + real paid-order aggregates. "Bought together" needs ≥2 real co-purchases. |
+| `POST\|DELETE /cart`, `POST /cart/quote` | Quantities only are stored; prices and stock are re-validated server-side (`canPurchase`, `priceCart`). |
+| `POST /wishlist`, `POST\|DELETE /compare` (max 4), `POST /viewed`, `POST\|DELETE /searches`, `POST /activity/clear` | Session-scoped. |
+| `PUT /preferences`, `POST\|DELETE /addresses` | Optional profile; max 5 addresses. |
+| `GET /orders`, `POST /orders/claim`, `POST /orders/reissue` | Only orders placed by, or claimed with ref + code into, this session. |
+| `POST /checkout` | Guest checkout via `placeOrder`; amount/currency server-validated; fails closed without a matching delivery zone. Returns the one-time tracking code. |
+| `GET /notifications`, `POST /notifications/read` | Derived from real order/ticket history; price alerts and marketing are opt-in. |
+| `GET\|POST /enquiries`, `GET\|POST /returns` | Opens a staff ticket / a return, refund, cancellation, damaged or incorrect-item request. Never an automatic refund. |
+| `DELETE /data` | "Forget me": deletes the server record and rotates the cookie. Placed orders remain with the business. |

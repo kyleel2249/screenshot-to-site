@@ -26,6 +26,8 @@ export interface OrderRow {
   items: OrderItemRow[]; hasPreorder: boolean; trackingSecretHash: string; processedEvents: string[]; history: { from: OrderStatus | null; to: OrderStatus; actor?: string; at: number; note?: string }[];
   reservedUntil: number; createdAt: number; refunded: number; paymentMethod?: "card" | "mobile_money" | "bank_transfer";
   bankTransfer?: { startedAt: number; confirmedBy?: string; reference?: string };
+  /** Recorded by staff once known (never invented); shown to the customer on tracking. */
+  shipment?: { carrier?: string; trackingRef?: string; estimatedDelivery?: string };
 }
 export interface SessionRow { id: string; userId: string; expiresAt: number; revoked: boolean; authAt: number; mfaOk?: boolean }
 export interface TicketRow { id: string; userId?: string; email: string; subject: string; status: "open" | "pending" | "resolved"; priority: "low" | "normal" | "high"; messages: { author: string; internal: boolean; body: string; at: number }[]; createdAt: number }
@@ -45,6 +47,22 @@ export interface PurchaseOrderRow {
   receipts: { at: number; by: string; lines: { variantId: string; qty: number }[] }[];
 }
 export interface PrivacyRequest { id: string; userId: string; kind: "export" | "deletion" | "correction"; status: "open" | "done"; at: number }
+/** Anonymous shopping session (no login). Created lazily on the first write; expires after GUEST_SESSION_TTL_MS of inactivity. */
+export interface GuestSessionRow {
+  id: string; createdAt: number; lastSeen: number;
+  cart: { variantId: string; qty: number }[];
+  /** Newest first. The price/availability snapshot at save time lets the dashboard report real changes, never invented ones. */
+  wishlist: { productId: string; at: number; avail: string; ghs?: number; usd?: number }[];
+  compare: string[]; viewed: { productId: string; at: number }[]; searches: { q: string; at: number }[];
+  addresses: { id: string; label: string; recipient: string; region: string; city: string; street: string; phone?: string }[];
+  prefs: import("../lib/guest-types").GuestPrefs;
+  orderIds: string[]; enquiryIds: string[]; returnIds: string[]; notificationsReadAt: number;
+}
+export interface EnquiryRow { id: string; ref: string; sessionId: string; ticketId: string; category: string; orderRef?: string; subject: string; createdAt: number }
+export interface ReturnRequestRow {
+  id: string; ref: string; sessionId: string; orderId: string; orderRef: string; kind: string; variantId?: string; productName?: string;
+  reason: string; description: string; ticketId?: string; outcome: "cancelled" | "requested" | "logged"; createdAt: number;
+}
 export interface AuditRow { id: number; actor?: string; event: string; detail: Record<string, string | number | boolean>; at: number }
 
 export class MemoryDb {
@@ -78,6 +96,9 @@ export class MemoryDb {
   exchangeRate?: import("../lib/domain/exchange").ApprovedRate;
   adminSetupClosed = false;
   redemptions = new Map<string, number>(); // `${userId}|${code}`
+  guestSessions = new Map<string, GuestSessionRow>();
+  enquiries = new Map<string, EnquiryRow>();
+  returnRequests = new Map<string, ReturnRequestRow>();
   seq = 0;
   nextId(prefix: string) { return `${prefix}_${(++this.seq).toString(36)}${Math.random().toString(36).slice(2, 8)}`; }
   log(event: string, detail: Record<string, string | number | boolean> = {}, actor?: string) {

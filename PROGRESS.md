@@ -100,3 +100,6 @@ Run `npm i && npm run build && npm test` locally to verify the UI layer and rege
 1. `echo -n "<your reference>" | bun scripts/hash-bootstrap-ref.ts` → store output as secret `ADMIN_BOOTSTRAP_REF_HASH`. Do not put the raw reference in the repo or any frontend env.
 2. Set `ADMIN_PORTAL_PATH` and `SESSION_SECRET`.
 3. Supply verified contact details, address, registration info and real product data.
+
+## Customer dashboard (anonymous guest sessions)
+- `/dashboard` with 22 working modules, `/api/guest/*`, rule-based recommendations, guest checkout/tracking/returns. Server logic tested (49 new tests); UI syntax-checked only — see `docs/CUSTOMER_DASHBOARD.md` for exact verification status and owner actions.

@@ -120,6 +120,31 @@ export function requestCancellation(db: MemoryDb, actor: Actor | null, orderId: 
   return { ok: true as const };
 }
 
+/**
+ * Cancellation for an order owned by an anonymous session (the caller has already proven ownership: the order is linked to the
+ * caller's session). Unpaid orders are cancelled and their stock released immediately; paid orders become a cancellation REQUEST
+ * that staff approve — never an automatic refund.
+ */
+export function requestGuestCancellation(db: MemoryDb, orderId: string, now = Date.now()): { ok: true; outcome: "cancelled" | "requested" } | { ok: false; error: string } {
+  const o = db.orders.get(orderId);
+  if (!o) return { ok: false, error: "Order not found." };
+  if (o.status === "pending_payment") { releaseReservation(db, o); setStatus(o, "cancelled", undefined, "Customer cancelled", now); return { ok: true, outcome: "cancelled" }; }
+  if (!canTransition(o.status, "cancellation_requested")) return { ok: false, error: "This order can no longer be cancelled online." };
+  setStatus(o, "cancellation_requested", undefined, "Customer request", now);
+  return { ok: true, outcome: "requested" };
+}
+
+/** Staff record carrier / tracking reference / estimated delivery once they actually know them. Nothing is defaulted. */
+export function setShipment(db: MemoryDb, actor: Actor | null, orderId: string, raw: { carrier?: unknown; trackingRef?: unknown; estimatedDelivery?: unknown }) {
+  requirePermission(actor, "order.update");
+  const o = db.orders.get(orderId); if (!o) throw new ValidationError(["Unknown order."]);
+  const clean = (v: unknown, max: number) => (typeof v === "string" ? v.replace(/[\u0000-\u001f]/g, " ").trim().slice(0, max) : "");
+  const carrier = clean(raw.carrier, 80), trackingRef = clean(raw.trackingRef, 80), estimatedDelivery = clean(raw.estimatedDelivery, 40);
+  if (estimatedDelivery && !/^\d{4}-\d{2}-\d{2}$/.test(estimatedDelivery)) throw new ValidationError(["Enter the estimated delivery date as YYYY-MM-DD."]);
+  o.shipment = { ...(carrier ? { carrier } : {}), ...(trackingRef ? { trackingRef } : {}), ...(estimatedDelivery ? { estimatedDelivery } : {}) };
+  db.log("order.shipment_recorded", { orderId }, actor.id);
+}
+
 /* ---------- staff operations ---------- */
 export function staffUpdateStatus(db: MemoryDb, actor: Actor | null, orderId: string, to: OrderStatus, note?: string) {
   requirePermission(actor, "order.update");

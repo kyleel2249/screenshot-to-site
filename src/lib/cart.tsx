@@ -14,6 +14,8 @@ interface Ctx {
   setQty: (variantId: string, qty: number) => AddResult;
   remove: (variantId: string) => void;
   clear: () => void;
+  /** Replaces the whole cart in one step (used by the dashboard to mirror its session cart). Callers pass only lines the server accepted. */
+  replace: (lines: CartLine[]) => void;
   count: number;
   /** Call after sign-in: merges this browser's cart with the saved account cart. */
   afterLogin: () => Promise<void>;
@@ -71,6 +73,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
     },
     remove: (id) => persist(lines.filter((l) => l.variantId !== id)),
     clear: () => persist([]),
+    replace: (next) => persist(next.filter((l) => Number.isInteger(l.qty) && l.qty > 0)),
     count: lines.reduce((s, l) => s + l.qty, 0),
     afterLogin: sync,
     afterLogout: () => { signedIn.current = false; setLines([]); saveLocal([]); },

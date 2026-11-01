@@ -27,6 +27,7 @@ const MORE = [
   { to: "/preorders", label: "Pre-orders" },
   { to: "/wholesale", label: "Wholesale" },
   { to: "/faq", label: "FAQ" },
+  { to: "/dashboard", label: "My Dashboard" },
 ] as const;
 /** Shown at the top of "More" only while the bar is too narrow to hold them (below 1700px). */
 const MORE_NARROW = PRIMARY.filter((n) => n.wideOnly);
